@@ -1,0 +1,15 @@
+{
+  "name": "llm-planner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "check:providers": "tsx scripts/check-providers.ts --live",
+    "eval:mock": "tsx scripts/eval.ts --mock",
+    "eval:live": "tsx scripts/eval.ts --live"
+  },
+  "dependencies": { "ethers": "^6.13.0", "zod": "^4.0.0" },
+  "devDependencies": { "@types/node": "^20.0.0", "tsx": "^4.19.0", "typescript": "^5.6.0" }
+}
