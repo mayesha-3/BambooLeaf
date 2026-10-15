@@ -12,7 +12,17 @@ async function migrateInitialCollections(database) {
     })
   }
 
-  for (const name of [COLLECTIONS.auditHeads, COLLECTIONS.goals, COLLECTIONS.policyUsage]) {
+  for (const name of [
+    COLLECTIONS.auditHeads,
+    COLLECTIONS.goals,
+    COLLECTIONS.policyUsage,
+    COLLECTIONS.deviceAccounts,
+    COLLECTIONS.deviceChallenges,
+    COLLECTIONS.deviceSessions,
+    COLLECTIONS.devices,
+    COLLECTIONS.deviceAttempts,
+    COLLECTIONS.deviceBlocks,
+  ]) {
     if (!existing.has(name)) {
       await database.createCollection(name)
     }

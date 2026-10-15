@@ -3,4 +3,10 @@ export const COLLECTIONS = Object.freeze({
   auditHeads: 'audit_heads',
   goals: 'goal_requests',
   policyUsage: 'policy_usage',
+  deviceAccounts: 'device_accounts',
+  deviceChallenges: 'device_challenges',
+  deviceSessions: 'device_sessions',
+  devices: 'devices',
+  deviceAttempts: 'device_attempts',
+  deviceBlocks: 'device_blocks',
 })

@@ -7,6 +7,17 @@ async function ensureIndexes(database) {
     database.collection(COLLECTIONS.goals).createIndex({ idempotencyKey: 1 }, { unique: true }),
     database.collection(COLLECTIONS.goals).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     database.collection(COLLECTIONS.policyUsage).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    database.collection(COLLECTIONS.deviceAccounts).createIndex({ walletAddress: 1 }, { unique: true }),
+    database.collection(COLLECTIONS.deviceChallenges).createIndex({ nonce: 1 }, { unique: true }),
+    database.collection(COLLECTIONS.deviceChallenges).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    database.collection(COLLECTIONS.deviceSessions).createIndex({ tokenHash: 1 }, { unique: true }),
+    database.collection(COLLECTIONS.deviceSessions).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    database.collection(COLLECTIONS.devices).createIndex({ walletAddress: 1, deviceId: 1 }, { unique: true }),
+    database.collection(COLLECTIONS.deviceAttempts).createIndex({ walletAddress: 1, createdAt: -1 }),
+    database.collection(COLLECTIONS.deviceBlocks).createIndex(
+      { walletAddress: 1, type: 1, target: 1 },
+      { unique: true },
+    ),
   ])
 }
 
