@@ -2,6 +2,8 @@ import { JsonRpcProvider, Wallet, parseEther } from 'ethers'
 import { verifyGuardAuthorization } from '../guard/guard-auth.tsx'
 import { buildNativeTransfer } from '../chain/transaction-builder.tsx'
 import { transactionDigest } from './approval-digest.tsx'
+import { requireKillSwitchOff } from '../guard/autonomy-manager.tsx'
+import { nextNonce, resetNonceCache } from './nonce-manager.tsx'
 
 let provider
 let wallet
@@ -22,6 +24,7 @@ function getSigner() {
 }
 
 function sendAuthorizedNativeTransfer(intent, authorization) {
+  requireKillSwitchOff()
   const operation = sendQueue.then(async () => {
     const tx = buildNativeTransfer(intent)
     const authPayload = {
@@ -41,7 +44,8 @@ function sendAuthorizedNativeTransfer(intent, authorization) {
       throw new Error('Connected chain ID does not match the configured policy chain')
     }
 
-    const nonce = await rpc.getTransactionCount(signer.address, 'pending')
+    // Use Nonce Manager to avoid duplicate nonces
+    const nonce = await nextNonce(rpc, signer)
     const expiresAt = authorization.expiresAt
     const digest = transactionDigest({
       chainId,
@@ -70,6 +74,10 @@ function sendAuthorizedNativeTransfer(intent, authorization) {
     return { txHash: receipt.hash, status: 'confirmed', digest }
   })
 
+  // If the operation fails, reset the nonce cache
+  operation.catch(() => {
+    resetNonceCache()
+  })
   sendQueue = operation.then(() => undefined, () => undefined)
   return operation
 }
