@@ -1,6 +1,5 @@
 import Icon from '../components/ui/Icon'
 import Card from '../components/ui/Card'
-import Badge from '../components/ui/Badge'
 import PageHeading from '../components/ui/PageHeading'
 
 export default function SettingsPage() {

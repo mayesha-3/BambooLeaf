@@ -125,6 +125,13 @@ export const iconPaths: Record<IconName, ReactNode> = {
   ),
   bolt: <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />,
   edit: <path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />,
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42" />
+    </>
+  ),
+  moon: <path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" />,
 }
 
 export function Icon({ name, size = 18, className = '' }: { name: IconName; size?: number; className?: string }) {

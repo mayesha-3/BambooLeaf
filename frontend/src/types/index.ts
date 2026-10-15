@@ -1,4 +1,4 @@
-export type Page = 'overview' | 'activity' | 'approvals' | 'policy' | 'autonomy' | 'wallet' | 'arena' | 'settings'
+export type Page = 'chat' | 'overview' | 'activity' | 'approvals' | 'policy' | 'autonomy' | 'wallet' | 'arena' | 'settings'
 
 export type IconName =
   | 'grid'
@@ -31,6 +31,8 @@ export type IconName =
   | 'layers'
   | 'bolt'
   | 'edit'
+  | 'sun'
+  | 'moon'
 
 export type AuditEntry = { seq: number; requestId: string; type: string; createdAt: string; data: Record<string, unknown>; hash: string; prevHash: string }
 export type AuditState = { entries: AuditEntry[]; valid: boolean | null; checked: number; error: string; loading: boolean }
