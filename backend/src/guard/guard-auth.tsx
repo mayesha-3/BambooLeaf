@@ -8,6 +8,8 @@ function authorizationPayload(payload, expiresAt) {
     intentId: payload.intentId,
     recipient: payload.recipient.toLowerCase(),
     valueWei: payload.valueWei,
+    transactionTo: payload.transactionTo?.toLowerCase() ?? '',
+    transactionData: payload.transactionData?.toLowerCase() ?? '',
     expiresAt,
   })
 }

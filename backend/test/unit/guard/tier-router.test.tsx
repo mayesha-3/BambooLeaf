@@ -73,3 +73,12 @@ test('T3 on forbidden pattern', () => {
   const result = routeTier(makeInput({ forbiddenPatterns: ['transfer'] }))
   assert.equal(result.tier, 'T3')
 })
+
+test('T2 when the swap router is not allow-listed', () => {
+  const result = routeTier(makeInput({
+    targetContract: recipient,
+    allowedContracts: new Set<string>(),
+  }))
+  assert.equal(result.tier, 'T2')
+  assert.match(result.reasons[0], /not allow-listed/)
+})

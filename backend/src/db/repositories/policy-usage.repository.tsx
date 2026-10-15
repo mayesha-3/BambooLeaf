@@ -11,17 +11,19 @@ async function reserveTransfer(database, {
   maxPerRecipientPerDayWei,
   maxTxPerWindow,
   velocityWindowSeconds,
+  scope = 'native',
   now = new Date(),
 }) {
   const collection = database.collection(COLLECTIONS.policyUsage)
   const canonicalRecipient = recipient.toLowerCase()
+  const canonicalScope = String(scope).replace(/[^A-Za-z0-9:_-]/g, '_')
   const amount = BigInt(valueWei)
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   const nextDay = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000)
   const windowMs = velocityWindowSeconds * 1000
   const windowStart = new Date(Math.floor(now.getTime() / windowMs) * windowMs)
-  const velocityId = `velocity:${canonicalRecipient}:${windowStart.toISOString()}`
-  const dailyId = `daily:${canonicalRecipient}:${dayStart.toISOString()}`
+  const velocityId = `velocity:${canonicalScope}:${canonicalRecipient}:${windowStart.toISOString()}`
+  const dailyId = `daily:${canonicalScope}:${canonicalRecipient}:${dayStart.toISOString()}`
 
   if (amount > maxPerRecipientPerDayWei) {
     return { allowed: false, reason: 'Per-recipient daily cap exceeded.' }

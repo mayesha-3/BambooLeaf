@@ -30,8 +30,22 @@ const TOKENS: TokenInfo[] = [
 ]
 
 export function getToken(symbol: string, chainId: number): TokenInfo {
+  const normalizedSymbol = symbol.toUpperCase()
+  const configuredAddress = process.env[`TOKEN_${normalizedSymbol}_ADDRESS`]
+  if (configuredAddress && Number(process.env.CHAIN_ID || 31337) === chainId) {
+    const decimals = Number(process.env[`TOKEN_${normalizedSymbol}_DECIMALS`] || (normalizedSymbol === 'USDC' ? 6 : 18))
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
+      throw new Error(`Invalid decimals configured for token ${normalizedSymbol}`)
+    }
+    return {
+      symbol: normalizedSymbol,
+      address: getAddress(configuredAddress),
+      decimals,
+      chainId,
+    }
+  }
   const token = TOKENS.find(
-    (t) => t.symbol === symbol.toUpperCase() && t.chainId === chainId,
+    (t) => t.symbol === normalizedSymbol && t.chainId === chainId,
   )
   if (!token) {
     throw new Error(`Unknown token: ${symbol} on chain ${chainId}`)

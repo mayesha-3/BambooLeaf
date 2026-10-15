@@ -1,5 +1,9 @@
-import { getAddress, parseEther } from 'ethers'
+import { Contract, getAddress, parseEther, parseUnits } from 'ethers'
 import { issueGuardAuthorization } from './guard-auth.tsx'
+import { getToken } from '../chain/token-registry.tsx'
+import { buildSwapTransactions } from '../chain/transaction-builder.tsx'
+
+const swapRouterAbi = ['function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)']
 
 function parsePositiveWei(amount) {
   try {
@@ -19,6 +23,81 @@ function readPolicyConfig(environment = process.env) {
     velocityWindowSeconds: Number(environment.VELOCITY_WINDOW_SECONDS || 600),
     allowedRecipients: new Set((environment.ALLOWED_RECIPIENTS || '')
       .split(',').map((address) => address.trim()).filter(Boolean).map(getAddress)),
+    allowedContracts: new Set((environment.ALLOWED_CONTRACTS || '')
+      .split(',').map((address) => address.trim()).filter(Boolean).map(getAddress)),
+    allowedSwapRouters: new Set((environment.ALLOWED_SWAP_ROUTERS || '')
+      .split(',').map((address) => address.trim()).filter(Boolean).map(getAddress)),
+    swapRouterAddress: environment.SWAP_ROUTER_ADDRESS ? getAddress(environment.SWAP_ROUTER_ADDRESS) : '',
+    maxSlippageBps: Number(environment.MAX_SLIPPAGE_BPS || 100),
+    maxSwapInputAmount: environment.MAX_SWAP_INPUT_AMOUNT || '',
+    maxSwapPerTokenPerDay: environment.MAX_SWAP_PER_TOKEN_PER_DAY || '',
+  }
+}
+
+async function evaluateSwap(intent, { provider, recipient, config }) {
+  if (intent.action !== 'swap' || !intent.to?.token || !intent.from.amount) {
+    return { allowed: false, reason: 'Swap intent is incomplete.' }
+  }
+  if (intent.chainId !== config.chainId) {
+    return { allowed: false, reason: 'Intent chain ID does not match the configured chain.' }
+  }
+  if (!Number.isInteger(config.maxSlippageBps) || config.maxSlippageBps < 0 || config.maxSlippageBps > 500) {
+    return { allowed: false, reason: 'Configured slippage cap must be between 0 and 500 basis points.' }
+  }
+  if (!Number.isInteger(intent.maxSlippageBps) || intent.maxSlippageBps < 0 ||
+      intent.maxSlippageBps > config.maxSlippageBps) {
+    return { allowed: false, reason: `Requested slippage exceeds the configured ${config.maxSlippageBps} bps cap.` }
+  }
+  const router = config.swapRouterAddress
+  if (!router || !config.allowedSwapRouters.has(router)) {
+    return { allowed: false, reason: 'Swap router is not configured and allow-listed.' }
+  }
+
+  try {
+    const tokenIn = getToken(intent.from.token, intent.chainId)
+    const tokenOut = getToken(intent.to.token, intent.chainId)
+    const amountIn = parseUnits(intent.from.amount, tokenIn.decimals)
+    if (!config.maxSwapInputAmount) {
+      return { allowed: false, reason: 'MAX_SWAP_INPUT_AMOUNT must be configured before swaps are enabled.' }
+    }
+    if (!config.maxSwapPerTokenPerDay) {
+      return { allowed: false, reason: 'MAX_SWAP_PER_TOKEN_PER_DAY must be configured before swaps are enabled.' }
+    }
+    if (amountIn > parseUnits(config.maxSwapInputAmount, tokenIn.decimals)) {
+      return { allowed: false, reason: 'Swap input exceeds the configured per-transaction cap.' }
+    }
+    if (amountIn <= 0n || tokenIn.address.toLowerCase() === tokenOut.address.toLowerCase()) {
+      return { allowed: false, reason: 'Swap tokens or input amount are invalid.' }
+    }
+    const routerContract = new Contract(router, swapRouterAbi, provider)
+    const amounts = await routerContract.getAmountsOut(amountIn, [tokenIn.address, tokenOut.address])
+    const quotedAmountOut = BigInt(amounts[amounts.length - 1])
+    const built = buildSwapTransactions(intent, {
+      routerAddress: router,
+      recipient,
+      quotedAmountOut,
+      maxSlippageBps: intent.maxSlippageBps,
+    })
+    const authorization = issueGuardAuthorization({
+      chainId: intent.chainId,
+      intentId: intent.intentId,
+      recipient: getAddress(recipient),
+      valueWei: '0',
+      transactionTo: built.swap.to,
+      transactionData: built.swap.data,
+    })
+    return {
+      allowed: true,
+      reason: 'Router, tokens, chain, quote, and slippage policy checks passed.',
+      authorization,
+      valueWei: amountIn.toString(),
+      swap: built,
+    }
+  } catch (error) {
+    return {
+      allowed: false,
+      reason: error instanceof Error ? `Swap quote or validation failed: ${error.message}` : 'Swap quote or validation failed.',
+    }
   }
 }
 
@@ -66,4 +145,4 @@ function evaluateNativeTransfer(intent, config) {
   }
 }
 
-export { evaluateNativeTransfer, parsePositiveWei, readPolicyConfig }
+export { evaluateNativeTransfer, evaluateSwap, parsePositiveWei, readPolicyConfig }

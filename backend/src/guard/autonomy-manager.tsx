@@ -9,12 +9,18 @@ type State = {
   frozen: boolean
 }
 
+function configuredInitialLevel(): AutonomyLevel {
+  const level = process.env.AUTONOMY_LEVEL || 'L1'
+  if (level === 'L0' || level === 'L1' || level === 'L2' || level === 'L3') return level
+  throw new Error('AUTONOMY_LEVEL must be L0, L1, L2, or L3')
+}
+
 const PROMOTION_THRESHOLD = 10
 const DEMOTION_BLOCKED = 3
 const WINDOW_MS = 10 * 60 * 1000
 
 const state: State = {
-  level: 'L1',
+  level: configuredInitialLevel(),
   cleanStreak: 0,
   blockedInWindow: 0,
   windowStartedAt: Date.now(),

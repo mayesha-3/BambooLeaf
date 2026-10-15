@@ -79,7 +79,7 @@ test('fails when swap has unusual approval', () => {
   assert.match(result.reasons[0], /Unusual approval/)
 })
 
-test('fails when too many contracts are called', () => {
+test('passes a swap that calls its allow-listed router and satisfies minimum output', () => {
   const result = checkIntentOutcome(
     {
       action: 'swap',
@@ -89,10 +89,28 @@ test('fails when too many contracts are called', () => {
     },
     {
       success: true,
-      contractsCalled: ['0xa', '0xb', '0xc', '0xd', '0xe'],
+      tokenReceived: 'ETH',
+      amountReceived: 100n,
+      minAmountOut: 90n,
+      expectedRouter: recipient,
+      contractsCalled: [recipient, '0x0000000000000000000000000000000000000002'],
     },
   )
 
+  assert.equal(result.passed, true)
+})
+
+test('fails a swap that does not meet the minimum output', () => {
+  const result = checkIntentOutcome(
+    {
+      action: 'swap',
+      chainId: 11155111,
+      from: { token: 'USDC', amount: '10' },
+      to: { token: 'ETH' },
+    },
+    { success: true, tokenReceived: 'ETH', amountReceived: 89n, minAmountOut: 90n },
+  )
+
   assert.equal(result.passed, false)
-  assert.match(result.reasons[0], /Too many contracts/)
+  assert.ok(result.reasons.includes('Swap output did not meet the authorized minimum'))
 })

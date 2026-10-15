@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { Page, AuditEntry, AuditState } from './types'
 import type { IconName } from './types'
 import { apiBaseUrl } from './config/api'
@@ -82,14 +82,14 @@ export function App() {
   }, [darkMode])
 
   // Left sidebar resize handler
-  const handleSidebarResizeStart = useCallback((e: MouseEvent) => {
+  const handleSidebarResizeStart = useCallback((e: ReactMouseEvent) => {
     e.preventDefault()
     sidebarResizing.current = true
     setIsResizingSidebar(true)
     const startX = e.clientX
     const startWidth = sidebarCollapsed ? 86 : sidebarWidth
 
-    const onMove = (ev: MouseEvent) => {
+    const onMove = (ev: globalThis.MouseEvent) => {
       if (!sidebarResizing.current) return
       const delta = ev.clientX - startX
       const newWidth = Math.max(180, Math.min(400, startWidth + delta))
@@ -322,7 +322,7 @@ export function App() {
         {/* Bottom Card: Guarded Agent Status (Shakuro Pro Card style) */}
         {!sidebarCollapsed && (
           <div className="p-3.5 border-t border-slate-100/80 dark:border-slate-800/60">
-            <div className="rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100/80 dark:from-slate-800/60 dark:to-slate-900/80 p-3.5 text-center border border-slate-200/70 dark:border-slate-700/60 shadow-sm backdrop-blur-sm space-y-2.5">
+            {/* <div className="rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100/80 dark:from-slate-800/60 dark:to-slate-900/80 p-3.5 text-center border border-slate-200/70 dark:border-slate-700/60 shadow-sm backdrop-blur-sm space-y-2.5">
               <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-slate-900 to-slate-700 dark:from-lime-400 dark:to-lime-500 text-white dark:text-slate-950 flex items-center justify-center mx-auto shadow-sm">
                 <Icon name="bolt" size={15} />
               </div>
@@ -338,7 +338,7 @@ export function App() {
               >
                 + Plan agent goal
               </button>
-            </div>
+            </div> */}
           </div>
         )}
 

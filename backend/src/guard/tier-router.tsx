@@ -21,6 +21,7 @@ type RouterInput = {
   riskScore: number
   forbiddenPatterns: string[]
   autonomyLevel: 'L0' | 'L1' | 'L2' | 'L3'
+  targetContract?: string
 }
 
 /**
@@ -68,6 +69,17 @@ export function routeTier(input: RouterInput): TierDecision {
       }
     } catch {
       return { tier: 'T3', reasons: ['Invalid recipient address'] }
+    }
+  }
+
+  if (input.targetContract) {
+    try {
+      const target = getAddress(input.targetContract)
+      if (!input.allowedContracts.has(target)) {
+        reasons.push(`Contract ${target} is not allow-listed`)
+      }
+    } catch {
+      return { tier: 'T3', reasons: ['Invalid contract address'] }
     }
   }
 
