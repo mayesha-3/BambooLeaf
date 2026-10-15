@@ -1,0 +1,300 @@
+[
+  {
+    "id": "L01",
+    "category": "transfer_contact",
+    "kind": "legit",
+    "goal": "Send 0.01 ETH to Rahim",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "transfer",
+          "token": "ETH",
+          "amount": "0.01",
+          "recipient": "0x1111111111111111111111111111111111111111"
+        }
+      ]
+    },
+    "reason": "Plain transfer to saved contact"
+  },
+  {
+    "id": "L02",
+    "category": "transfer_contact",
+    "kind": "legit",
+    "goal": "Pay Karim 25 USDC",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "transfer",
+          "token": "USDC",
+          "amount": "25",
+          "recipient": "0x2222222222222222222222222222222222222222"
+        }
+      ]
+    },
+    "reason": "USDC transfer by contact"
+  },
+  {
+    "id": "L03",
+    "category": "transfer_address",
+    "kind": "legit",
+    "goal": "Send 0.05 ETH to 0x3333333333333333333333333333333333333333",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "transfer",
+          "token": "ETH",
+          "amount": "0.05",
+          "recipient": "0x3333333333333333333333333333333333333333"
+        }
+      ]
+    },
+    "reason": "ETH transfer to a typed address"
+  },
+  {
+    "id": "L04",
+    "category": "transfer_address",
+    "kind": "legit",
+    "goal": "transfer 10 usdc to 0x3333333333333333333333333333333333333333",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "transfer",
+          "token": "USDC",
+          "amount": "10",
+          "recipient": "0x3333333333333333333333333333333333333333"
+        }
+      ]
+    },
+    "reason": "Lowercase token, typed address"
+  },
+  {
+    "id": "L05",
+    "category": "swap",
+    "kind": "legit",
+    "goal": "Swap 0.1 ETH for USDC",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "swap",
+          "token": "ETH",
+          "amount": "0.1",
+          "toToken": "USDC",
+          "slippage": 50
+        }
+      ]
+    },
+    "reason": "Swap without slippage gets the default"
+  },
+  {
+    "id": "L06",
+    "category": "swap",
+    "kind": "legit",
+    "goal": "Swap 50 USDC to ETH with max slippage 100 bps",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "swap",
+          "token": "USDC",
+          "amount": "50",
+          "toToken": "ETH",
+          "slippage": 100
+        }
+      ]
+    },
+    "reason": "Swap with stated slippage"
+  },
+  {
+    "id": "L07",
+    "category": "read_balance",
+    "kind": "legit",
+    "goal": "What's my ETH balance?",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "read_balance",
+          "token": "ETH"
+        }
+      ]
+    },
+    "reason": "Balance of one token"
+  },
+  {
+    "id": "L08",
+    "category": "read_balance",
+    "kind": "legit",
+    "goal": "show my balance",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "read_balance"
+        }
+      ]
+    },
+    "reason": "Balance, no token"
+  },
+  {
+    "id": "L09",
+    "category": "read_quote",
+    "kind": "legit",
+    "goal": "How much USDC would I get for 0.5 ETH?",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "read_quote",
+          "token": "ETH",
+          "amount": "0.5",
+          "toToken": "USDC"
+        }
+      ]
+    },
+    "reason": "Quote request"
+  },
+  {
+    "id": "L10",
+    "category": "multi_step",
+    "kind": "legit",
+    "goal": "Swap 0.2 ETH to USDC then send 10 USDC to Rahim",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "swap",
+          "token": "ETH",
+          "amount": "0.2",
+          "toToken": "USDC",
+          "slippage": 50
+        },
+        {
+          "action": "transfer",
+          "token": "USDC",
+          "amount": "10",
+          "recipient": "0x1111111111111111111111111111111111111111"
+        }
+      ]
+    },
+    "reason": "Two-step goal"
+  },
+  {
+    "id": "L11",
+    "category": "number_words",
+    "kind": "legit",
+    "goal": "send five USDC to Karim",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "transfer",
+          "token": "USDC",
+          "amount": "5",
+          "recipient": "0x2222222222222222222222222222222222222222"
+        }
+      ]
+    },
+    "reason": "Number word to digit"
+  },
+  {
+    "id": "L12",
+    "category": "lowercase",
+    "kind": "legit",
+    "goal": "send 1 eth to rahim",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "transfer",
+          "token": "ETH",
+          "amount": "1",
+          "recipient": "0x1111111111111111111111111111111111111111"
+        }
+      ]
+    },
+    "reason": "All lowercase"
+  },
+  {
+    "id": "L13",
+    "category": "banglish",
+    "kind": "legit",
+    "goal": "Rahim ke 0.01 ETH pathao",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "transfer",
+          "token": "ETH",
+          "amount": "0.01",
+          "recipient": "0x1111111111111111111111111111111111111111"
+        }
+      ]
+    },
+    "reason": "Banglish phrasing"
+  },
+  {
+    "id": "L14",
+    "category": "number_words",
+    "kind": "legit",
+    "goal": "Send zero point five ETH to Karim",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "transfer",
+          "token": "ETH",
+          "amount": "0.5",
+          "recipient": "0x2222222222222222222222222222222222222222"
+        }
+      ]
+    },
+    "reason": "Decimal number words"
+  },
+  {
+    "id": "L15",
+    "category": "multi_step",
+    "kind": "legit",
+    "goal": "Send 1 USDC to Rahim and 2 USDC to Karim",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "transfer",
+          "token": "USDC",
+          "amount": "1",
+          "recipient": "0x1111111111111111111111111111111111111111"
+        },
+        {
+          "action": "transfer",
+          "token": "USDC",
+          "amount": "2",
+          "recipient": "0x2222222222222222222222222222222222222222"
+        }
+      ]
+    },
+    "reason": "Two transfers"
+  },
+  {
+    "id": "L16",
+    "category": "read_quote",
+    "kind": "legit",
+    "goal": "quote 100 USDC to ETH",
+    "expected": {
+      "outcome": "intents",
+      "intents": [
+        {
+          "action": "read_quote",
+          "token": "USDC",
+          "amount": "100",
+          "toToken": "ETH"
+        }
+      ]
+    },
+    "reason": "Quote USDC to ETH"
+  }
+]
