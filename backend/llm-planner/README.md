@@ -42,22 +42,22 @@ npm run eval:live -- --runs 3 --rpm 20 --filter A --limit 10   # real calls, may
 
 | Variable | Meaning |
 |---|---|
-| `PROVIDERS` | Comma list of provider names, e.g. `alibaba,siliconflow` |
+| `PROVIDERS` | Comma list of provider names, today: `groq` (the only provider tested live) |
 | `PROVIDER_<NAME>_BASE_URL` | https URL (http only for localhost) |
 | `PROVIDER_<NAME>_API_KEY` | Secret. You fill it; never commit |
 | `PROVIDER_<NAME>_EXTRA_BODY` | JSON object merged into the request (use it to switch thinking off) |
 | `PROVIDER_<NAME>_JSON_MODE` | `true`/`false`: sends `response_format: json_object` |
 | `PLANNER_CHAIN`, `QUARANTINE_CHAIN` | `provider:model,provider:model` in failover order (first colon splits) |
-| `PLANNER_TOKENS` (ETH,USDC), `PLANNER_CHAIN_ID` (11155111), `PLANNER_DEFAULT_SLIPPAGE_BPS` (50) | Planner defaults |
+| `PLANNER_TOKENS` (ETH,USDC), `LOCAL_CHAIN_ID` (31337), `SEPOLIA_CHAIN_ID` (11155111), `PLANNER_NETWORK` (`local` or `sepolia`, default `sepolia`), `PLANNER_DEFAULT_SLIPPAGE_BPS` (50) | Planner defaults |
 | `LLM_TIMEOUT_MS` (20000), `LLM_MAX_OUTPUT_TOKENS` (600), `LLM_TOTAL_TOKEN_BUDGET` (200000) | Limits |
 
 ## Provider setup
 
-1. Create accounts and API keys for Alibaba Cloud Model Studio and SiliconFlow.
+1. We use **Groq** (free tier, OpenAI-compatible). Create a key in the Groq console. Alibaba Model Studio and SiliconFlow need payment details and are NOT used; the code still supports them through config only.
 2. `cp .env.example .env`, fill keys and model ids yourself.
 3. `npm run check:providers`, then `npm run eval:live -- --limit 5`, then the full set.
 
-**UNVERIFIED** (not checked against live docs or real keys): both base URLs, whether each chosen model supports JSON mode, and the exact parameter that disables thinking (`enable_thinking:false` is my best guess for both). No live Alibaba or SiliconFlow call has been made.
+**Tested live (Groq only):** `check:providers` and a 40-case evaluation on 2026-10-15 with `openai/gpt-oss-120b` and `openai/gpt-oss-20b`, JSON mode on, `reasoning_effort: low`. **UNVERIFIED:** Alibaba Model Studio and SiliconFlow (no key was used; their URLs and thinking switches in older notes are guesses). Groq free-tier limits and model ids change, so recheck them in the Groq console.
 
 ## Intent contract (for Person 1 and Person 4)
 
@@ -76,6 +76,10 @@ Failure codes: `INPUT_INVALID`, `MODEL_REFUSED`, `INVALID_OUTPUT`, `UNGROUNDED_R
 **Person 1 (guard) must validate again:** amount/recipient limits, allowed recipients, slippage ceiling (the planner allows up to 10000 bps), number of intents, daily velocity, chain id, token support. Treat the planner as untrusted. A typed attacker address the owner really typed passes the planner by design; the guard stops it.
 
 **Person 4 (API):** return the typed `code` and `message` (never raw model output) on failure; on success return `intents`. `stats` holds model calls and tokens.
+
+### Chain ids
+
+Two networks are supported, with the same variable names as the backend: `LOCAL_CHAIN_ID` (31337, Anvil) and `SEPOLIA_CHAIN_ID` (11155111). `PLANNER_NETWORK` selects which one is stamped on intents (`config.chainId`). The backend can also pass a chain id per call: `planGoal(goal, { ..., chainId: config.chainIds.local })`. The guard rejects any intent whose `chainId` differs from its own configured chain, so the backend must use the same network for the planner and the guard.
 
 ### Contract mismatches found (nothing edited)
 

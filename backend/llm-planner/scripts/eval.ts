@@ -37,7 +37,7 @@ if (live) {
   let last = 0
   chat = async (m) => { const wait = last + 60000 / rpm - Date.now(); if (wait > 0) await new Promise((r) => setTimeout(r, wait)); last = Date.now(); return inner(m) }
 } else {
-  console.log('*** MOCK MODE: rule-based fake model, no network. Results say nothing about Alibaba or SiliconFlow. ***')
+  console.log('*** MOCK MODE: rule-based fake model, no network. Results say nothing about Groq or any real model. ***')
   chat = createMockChat(Object.keys(book))
 }
 

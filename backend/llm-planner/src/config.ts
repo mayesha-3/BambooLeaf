@@ -11,6 +11,8 @@ export interface ProviderConfig {
   jsonMode: boolean
 }
 
+export type Network = 'local' | 'sepolia'
+
 export interface ChainEntry {
   provider: string
   model: string
@@ -21,6 +23,9 @@ export interface PlannerConfig {
   plannerChain: ChainEntry[]
   quarantineChain: ChainEntry[]
   tokens: string[]
+  network: Network
+  chainIds: Record<Network, number>
+  /** Chain id of the selected network; stamped on every intent by trusted code. */
   chainId: number
   defaultSlippageBps: number
   timeoutMs: number
@@ -83,7 +88,7 @@ export interface LoadOptions {
 export function loadConfig(env: Env, options: LoadOptions = {}): PlannerConfig {
   const requireKeys = options.requireKeys ?? true
   const names = (env.PROVIDERS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-  if (names.length === 0) throw new ConfigError('PROVIDERS is required (for example alibaba,siliconflow)')
+  if (names.length === 0) throw new ConfigError('PROVIDERS is required (for example groq)')
 
   const providers: Record<string, ProviderConfig> = {}
   for (const name of names) {
@@ -126,12 +131,21 @@ export function loadConfig(env: Env, options: LoadOptions = {}): PlannerConfig {
     throw new ConfigError('PLANNER_TOKENS must be a list of symbols like ETH,USDC')
   }
 
+  const network = (env.PLANNER_NETWORK ?? 'sepolia').trim().toLowerCase()
+  if (network !== 'local' && network !== 'sepolia') throw new ConfigError('PLANNER_NETWORK must be local or sepolia')
+  const chainIds: Record<Network, number> = {
+    local: parseInt10(env.LOCAL_CHAIN_ID, 31337, 'LOCAL_CHAIN_ID', 1, 2 ** 31),
+    sepolia: parseInt10(env.SEPOLIA_CHAIN_ID, 11155111, 'SEPOLIA_CHAIN_ID', 1, 2 ** 31),
+  }
+
   return {
     providers,
     plannerChain,
     quarantineChain,
     tokens: [...new Set(tokens)],
-    chainId: parseInt10(env.PLANNER_CHAIN_ID, 11155111, 'PLANNER_CHAIN_ID', 1, 2 ** 31),
+    network,
+    chainIds,
+    chainId: chainIds[network],
     defaultSlippageBps: parseInt10(env.PLANNER_DEFAULT_SLIPPAGE_BPS, 50, 'PLANNER_DEFAULT_SLIPPAGE_BPS', 1, 10000),
     timeoutMs: parseInt10(env.LLM_TIMEOUT_MS, 20000, 'LLM_TIMEOUT_MS', 100, 300000),
     maxOutputTokens: parseInt10(env.LLM_MAX_OUTPUT_TOKENS, 600, 'LLM_MAX_OUTPUT_TOKENS', 16, 8192),
