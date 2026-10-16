@@ -3,7 +3,7 @@ import { loadConfig, type PlannerConfig } from './config.ts'
 import { planGoal as planIntents } from './planner.ts'
 import { createChainChat, TokenBudget, type ChatFn, type FetchFn } from './provider.ts'
 import { toGuardIntent, type GuardShapeIntent } from './adapter.ts'
-import type { AddressBook } from './types.ts'
+import type { AddressBook, FailureCode, UntrustedSignal } from './types.ts'
 
 // Drop-in for backend/src/agent/planner.tsx:  planGoal(goal, chainId) -> one guard-shaped intent, or throws.
 // The backend decides whether to import this; nothing in backend/src is imported or edited here.
@@ -30,10 +30,24 @@ export const guardIntentShape = z.strictObject({
   }
 })
 
+/** Every bridge failure. `message` starts with `code`; `signal` is set for UNTRUSTED_CONTENT_FLAGGED. */
+export class BridgeError extends Error {
+  constructor(readonly code: FailureCode | 'CHAIN_NOT_ALLOWED' | 'MULTI_INTENT_UNSUPPORTED' | 'NOT_REPRESENTABLE' | 'GUARD_SHAPE_INVALID', message: string, readonly signal?: UntrustedSignal) {
+    super(`${code}: ${message}`)
+    this.name = 'BridgeError'
+  }
+}
+
+export interface BridgeOptions {
+  /** Outside text (invoices, memos, token metadata). Only the quarantined inspector reads it. */
+  untrusted?: string[]
+}
+
 export interface BridgeDeps {
   getConfig?: () => PlannerConfig
   /** Test hook: replace the real provider chain. */
   getChat?: (config: PlannerConfig) => ChatFn
+  getQuarantineChat?: (config: PlannerConfig) => ChatFn
   fetchFn?: FetchFn
   /** Saved contacts (name -> address). Called per request. */
   getAddressBook?: () => AddressBook
@@ -46,31 +60,37 @@ const emptyAddressBook = (): AddressBook => ({})
 export function createBridge(deps: BridgeDeps = {}) {
   let config: PlannerConfig | undefined
   let chat: ChatFn | undefined
+  let quarantineChat: ChatFn | undefined
+  let budget: TokenBudget | undefined
   const getConfig = deps.getConfig ?? (() => loadConfig(process.env))
   const getAddressBook = deps.getAddressBook ?? emptyAddressBook
 
-  return async function planGoal(goal: string, chainId: number): Promise<GuardShapeIntent> {
+  return async function planGoal(goal: string, chainId: number, options: BridgeOptions = {}): Promise<GuardShapeIntent> {
     config ??= getConfig()
     const allowed = [config.chainIds.local, config.chainIds.sepolia]
     if (!allowed.includes(chainId)) {
-      throw new Error(`CHAIN_NOT_ALLOWED: chainId must be one of ${allowed.join(', ')}`)
+      throw new BridgeError('CHAIN_NOT_ALLOWED', `chainId must be one of ${allowed.join(', ')}`)
     }
-    chat ??= deps.getChat
-      ? deps.getChat(config)
-      : createChainChat({ config, chain: config.plannerChain, budget: new TokenBudget(config.totalTokenBudget), fetchFn: deps.fetchFn })
+    budget ??= new TokenBudget(config.totalTokenBudget) // one budget shared by planner and quarantine
+    chat ??= deps.getChat ? deps.getChat(config) : createChainChat({ config, chain: config.plannerChain, budget, fetchFn: deps.fetchFn })
+    if (!quarantineChat) {
+      if (deps.getQuarantineChat) quarantineChat = deps.getQuarantineChat(config)
+      else if (config.quarantineChain.length > 0) quarantineChat = createChainChat({ config, chain: config.quarantineChain, budget, fetchFn: deps.fetchFn })
+    }
 
     const result = await planIntents(goal, {
       chat, tokens: config.tokens, chainId, defaultSlippageBps: config.defaultSlippageBps, addressBook: getAddressBook(),
+      untrusted: options.untrusted, quarantineChat,
     })
-    if (!result.ok) throw new Error(`${result.code}: ${result.message}`)
+    if (!result.ok) throw new BridgeError(result.code, result.message, result.signal)
     if (result.intents.length !== 1) {
-      throw new Error(`MULTI_INTENT_UNSUPPORTED: planner returned ${result.intents.length} intents; the guard accepts exactly one`)
+      throw new BridgeError('MULTI_INTENT_UNSUPPORTED', `planner returned ${result.intents.length} intents; the guard accepts exactly one`)
     }
     const converted = toGuardIntent(result.intents[0]!)
-    if (!converted) throw new Error('NOT_REPRESENTABLE: intent cannot be expressed in the guard intent shape (for example slippage above 500 bps)')
+    if (!converted) throw new BridgeError('NOT_REPRESENTABLE', 'intent cannot be expressed in the guard intent shape (for example slippage above 500 bps)')
     const checked = guardIntentShape.safeParse(converted)
     if (!checked.success) {
-      throw new Error(`GUARD_SHAPE_INVALID: ${checked.error.issues.map((i) => `${i.path.join('.') || '(root)'} ${i.message}`).join('; ')}`)
+      throw new BridgeError('GUARD_SHAPE_INVALID', checked.error.issues.map((i) => `${i.path.join('.') || '(root)'} ${i.message}`).join('; '))
     }
     return checked.data as GuardShapeIntent
   }

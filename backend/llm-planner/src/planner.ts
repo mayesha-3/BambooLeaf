@@ -4,10 +4,14 @@ import type { ZodError } from 'zod'
 import { makeSchemas, describeIssues } from './schema.ts'
 import { resolveIntents, ResolutionError, type ResolveOptions } from './resolve.ts'
 import type { ChatFn, ChatMessage } from './provider.ts'
-import type { AddressBook, FailureCode, PlanResult, PlanStats } from './types.ts'
+import type { AddressBook, FailureCode, PlanResult, PlanStats, UntrustedSignal } from './types.ts'
 import { describeGoal, silentLogger, type Logger } from './logger.ts'
+import { extractJson } from './json.ts'
+import { inspect, buildUntrustedBlock } from './quarantine.ts'
 
 const PROMPT_TEMPLATE = readFileSync(fileURLToPath(new URL('./prompts/planner.prompt.txt', import.meta.url)), 'utf8')
+
+export { extractJson }
 
 export const MAX_GOAL_CHARS = 1000
 export const MAX_RETRIES = 2
@@ -20,6 +24,10 @@ export interface PlannerDeps {
   addressBook?: AddressBook
   logger?: Logger
   newId?: ResolveOptions['newId']
+  /** Outside text (invoices, memos, token metadata). Read ONLY by the quarantined inspector, never by the planner. */
+  untrusted?: string[]
+  /** Chat for the quarantine chain. Required when `untrusted` is given, otherwise QUARANTINE_FAILED. */
+  quarantineChat?: ChatFn
 }
 
 export function checkGoal(goal: unknown): string | undefined {
@@ -38,29 +46,40 @@ export function buildSystemPrompt(tokens: string[], contactNames: string[]): str
   return PROMPT_TEMPLATE.replace('{{TOKENS}}', tokens.join(', ')).replace('{{CONTACTS}}', contactNames.length ? contactNames.join(', ') : '(none)')
 }
 
-export function extractJson(text: string): unknown {
-  let t = text.trim()
-  const fence = t.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
-  if (fence) t = fence[1]!.trim()
-  return JSON.parse(t)
-}
-
 export async function planGoal(goal: string, deps: PlannerDeps): Promise<PlanResult> {
   const logger = deps.logger ?? silentLogger
-  const stats: PlanStats = { modelCalls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, latencyMs: 0 }
-  const fail = (code: FailureCode, message: string): PlanResult => {
+  const stats: PlanStats = { modelCalls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, latencyMs: 0, quarantineCalls: 0 }
+  const fail = (code: FailureCode, message: string, extra: { signal?: UntrustedSignal; cause?: Extract<PlanResult, { ok: false }>['cause'] } = {}): PlanResult => {
     logger.warn('plan.failed', { code, ...describeGoal(String(goal ?? '')) })
-    return { ok: false, code, message, stats }
+    return { ok: false, code, message, stats, ...extra }
   }
 
   const problem = checkGoal(goal)
   if (problem) return fail('INPUT_INVALID', problem)
 
+  // Outside text goes ONLY to the quarantined inspector. The owner's own goal is never quarantined.
+  let untrustedBlock = ''
+  if (deps.untrusted !== undefined && deps.untrusted !== null && !(Array.isArray(deps.untrusted) && deps.untrusted.length === 0)) {
+    const q = await inspect(deps.untrusted, { chat: deps.quarantineChat, logger })
+    stats.quarantineCalls = q.stats.calls
+    stats.promptTokens += q.stats.promptTokens
+    stats.completionTokens += q.stats.completionTokens
+    stats.totalTokens += q.stats.totalTokens
+    stats.latencyMs += q.stats.latencyMs
+    if (!q.ok) return fail(q.code, q.message, { cause: q.cause })
+    if (q.result.isLikelyInjection) {
+      return fail('UNTRUSTED_CONTENT_FLAGGED', 'Untrusted content looks like an injection attempt; the planner was not called', {
+        signal: { kind: 'injection_suspected', source: 'untrusted_text', itemCount: q.itemCount },
+      })
+    }
+    untrustedBlock = buildUntrustedBlock(q.result.summary, q.itemCount)
+  }
+
   const book = deps.addressBook ?? {}
   const schemas = makeSchemas(deps.tokens)
   const messages: ChatMessage[] = [
     { role: 'system', content: buildSystemPrompt(deps.tokens, Object.keys(book)) },
-    { role: 'user', content: `<owner_goal>\n${sanitizeForPrompt(goal)}\n</owner_goal>` },
+    { role: 'user', content: `<owner_goal>\n${sanitizeForPrompt(goal)}\n</owner_goal>${untrustedBlock ? `\n${untrustedBlock}` : ''}` },
   ]
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {

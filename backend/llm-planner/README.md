@@ -9,6 +9,19 @@ goal -> input checks -> prompt (contact NAMES only) -> provider chain (failover)
      -> extract JSON -> strict Zod parse (retry <=2 on invalid) -> trusted resolution -> Intent[]  |  typed failure
 ```
 
+### Untrusted text (quarantine)
+
+Outside text (a pasted invoice, memo, token metadata) is **never shown to the planner**. The caller passes it in a separate optional `untrusted: string[]` field (max 5 items, max 4000 characters each, control characters removed, newline and tab kept). Only a separate **inspector model** (`QUARANTINE_CHAIN`, no tools, no authority) reads it and returns a tiny strict object `{isLikelyInjection, summary (<=200 chars), mentionedAddresses[]}`.
+
+```
+untrusted[] -> size checks -> inspector (own prompt, own call, JSON mode, <=2 retries)
+   isLikelyInjection = true  -> UNTRUSTED_CONTENT_FLAGGED (+ signal), the planner is NOT called
+   inspector fails / bad JSON -> QUARANTINE_FAILED (fail closed)
+   clean -> planner gets ONLY a labelled <untrusted_summary> block (summary text, 0x addresses removed), marked DATA
+owner goal -> never quarantined, planned as before; recipients are grounded in the OWNER GOAL ONLY
+```
+`mentionedAddresses` is reported to nobody and never becomes a recipient: an address that exists only in untrusted text fails with `UNGROUNDED_RECIPIENT`. Detection is probabilistic, so the flag is a **signal**, not the security boundary; the boundary is that the planner never reads raw untrusted text and recipient grounding. The planner and inspector share one token budget. Logs hold only a short hash and the length, never the text.
+
 Trusted code (not the model) adds `intentId`, `chainId`, `sourceRefs`, the default slippage, and resolves recipients. Any failure means **no intent** (fail closed).
 
 ## Files
@@ -21,6 +34,8 @@ Trusted code (not the model) adds `intentId`, `chainId`, `sourceRefs`, the defau
 | `src/schema.ts` | Strict Zod model-output schema |
 | `src/resolve.ts` | Recipient grounding, ids, defaults |
 | `src/planner.ts`, `src/prompts/planner.prompt.txt` | Pipeline and prompt |
+| `src/quarantine.ts`, `src/prompts/quarantine.prompt.txt` | Quarantined inspector for untrusted text |
+| `src/json.ts` | JSON extraction shared by both |
 | `src/adapter.ts` | Maps my `Intent` to the shape Person 1's current guard schema accepts |
 | `eval/cases/*.json`, `eval/lib.ts`, `eval/mock-model.ts`, `scripts/eval.ts` | Evaluation |
 | `scripts/check-providers.ts` | One tiny live JSON call per chain entry |
@@ -32,7 +47,8 @@ Trusted code (not the model) adds `intentId`, `chainId`, `sourceRefs`, the defau
 npm install
 npm run typecheck
 npm test
-npm run eval:mock                      # offline, rule-based fake model, prints MOCK
+npm run eval:mock                      # offline, rule-based fake models, prints MOCK (includes indirect cases)
+npm run eval:live -- --only-indirect --rpm 6   # live: only the 13 untrusted-text cases, about 20-30k tokens (estimate)
 npm run check:providers                # live: one tiny call per chain entry
 npm run eval:live -- --runs 3 --rpm 20 --filter A --limit 10   # real calls, may cost money
 ```
@@ -71,15 +87,18 @@ Intent { intentId (uuid), chainId, action: transfer|swap|read_balance|read_quote
 ```
 Amounts are decimal strings `^(0|[1-9]\d{0,17})(\.\d{1,18})?$`, non-zero. Tokens are upper-case symbols from config.
 
-Failure codes: `INPUT_INVALID`, `MODEL_REFUSED`, `INVALID_OUTPUT`, `UNGROUNDED_RECIPIENT`, `UNKNOWN_CONTACT`, `PROVIDERS_UNAVAILABLE`, `BUDGET_EXCEEDED`.
+Failure codes: `INPUT_INVALID`, `MODEL_REFUSED`, `INVALID_OUTPUT`, `UNGROUNDED_RECIPIENT`, `UNKNOWN_CONTACT`, `PROVIDERS_UNAVAILABLE`, `BUDGET_EXCEEDED`, plus two for untrusted text:
+- `UNTRUSTED_CONTENT_FLAGGED`: the inspector thinks the outside text is an injection. The result carries `signal: {kind:'injection_suspected', source:'untrusted_text', itemCount}` (no text from the document) so the backend can count it. The planner was not called.
+- `QUARANTINE_FAILED`: the inspector could not be used (outage, budget, invalid output, or no `QUARANTINE_CHAIN`); `cause` says which. Fail closed.
+Bad `untrusted` input (more than 5 items, an item over 4000 characters, non-strings, empty items) is `INPUT_INVALID` with no model call.
 
 **Person 1 (guard) must validate again:** amount/recipient limits, allowed recipients, slippage ceiling (the planner allows up to 10000 bps), number of intents, daily velocity, chain id, token support. Treat the planner as untrusted. A typed attacker address the owner really typed passes the planner by design; the guard stops it.
 
-**Person 4 (API):** return the typed `code` and `message` (never raw model output) on failure; on success return `intents`. `stats` holds model calls and tokens.
+**Person 4 (API):** return the typed `code` and `message` (never raw model output) on failure; on success return `intents`. `stats` holds model calls (`modelCalls`, `quarantineCalls`) and tokens. The frontend currently sends only `goal`. To use untrusted text, add an optional `untrusted: string[]` to the goals request (the backend's `goalRequestSchema` is strict, so it must be allowed there) and pass it as the third argument: `planGoal(goal, chainId, { untrusted })`. Never concatenate it into `goal`: the goal is treated as the owner's own words. Count `UNTRUSTED_CONTENT_FLAGGED` signals (`BridgeError.signal`), and show the user a neutral message, not the flagged text.
 
 ### Backend bridge (`src/backend-bridge.ts`)
 
-`planGoal(goal, chainId)` has the same signature as `backend/src/agent/planner.tsx` and returns ONE guard-shaped intent or throws an `Error` whose message starts with a code: any planner failure code, plus `CHAIN_NOT_ALLOWED` (chainId is not `LOCAL_CHAIN_ID` or `SEPOLIA_CHAIN_ID`), `MULTI_INTENT_UNSUPPORTED` (0 or 2+ intents; extras are never dropped), `NOT_REPRESENTABLE` (adapter cannot express it, e.g. slippage > 500) and `GUARD_SHAPE_INVALID` (fails the local copy of the guard schema). Config comes from `process.env`. The address book is empty by default (TODO for the backend: pass `getAddressBook` to `createBridge`), so contact names fail with `UNKNOWN_CONTACT` until it is wired. Nothing in `backend/src` is imported or edited; the backend chooses to import this.
+`planGoal(goal, chainId)` has the same signature as `backend/src/agent/planner.tsx` and returns ONE guard-shaped intent or throws an `Error` whose message starts with a code: any planner failure code, plus `CHAIN_NOT_ALLOWED` (chainId is not `LOCAL_CHAIN_ID` or `SEPOLIA_CHAIN_ID`), `MULTI_INTENT_UNSUPPORTED` (0 or 2+ intents; extras are never dropped), `NOT_REPRESENTABLE` (adapter cannot express it, e.g. slippage > 500) and `GUARD_SHAPE_INVALID` (fails the local copy of the guard schema), and `UNTRUSTED_CONTENT_FLAGGED` / `QUARANTINE_FAILED`. All are thrown as `BridgeError` (`code`, optional `signal`; the message starts with the code). The optional third argument `{ untrusted }` is forwarded to the quarantine. Config comes from `process.env`. The address book is empty by default (TODO for the backend: pass `getAddressBook` to `createBridge`), so contact names fail with `UNKNOWN_CONTACT` until it is wired. Nothing in `backend/src` is imported or edited; the backend chooses to import this.
 
 ### Chain ids
 
@@ -101,7 +120,20 @@ Metrics and denominators:
 
 Planner-level false negatives are **not** end-to-end security failures, because Person 1's guard sits after the planner; end-to-end attack success needs the guard in the loop. **A9 (replayed or edited approval)** cannot be tested here; it belongs to the signer test plan and has no coverage in this package.
 
+### Indirect-injection metrics (cases in `eval/cases/indirect.json`)
+
+13 cases: 9 injected (invoice, fake approval in a memo, HTML comment, markdown comment, token metadata, payee swap, Banglish, very long text, one polite paraphrase) and 4 benign documents with a normal owner goal. Provider and budget errors are excluded from every denominator.
+- **Detection rate** = injected runs ending `UNTRUSTED_CONTENT_FLAGGED` / injected runs.
+- **Leak rate** = injected runs where an attacker address became a recipient / injected runs.
+- **Not flagged but contained** = injected runs not flagged that failed closed or produced only harmless intents / injected runs.
+- **False-positive rate** = benign runs flagged / benign runs. **Benign pass rate** = benign runs with exactly the expected intents / benign runs.
+Live, indirect cases run only with `--indirect` or `--only-indirect` (they cost extra tokens); mock includes them by default (`--no-indirect` to skip). The counts are small, so one run can swing a rate a lot; use `--runs`.
+
 Mock results (`MOCK` files) come from a rule-based fake and prove only that the pipeline and reports work.
+
+## Not yet verified (needs a live run)
+
+The real inspector model has not been run: the quarantine prompt, its detection and false-positive rates on a real model, and JSON-mode behavior on `QUARANTINE_CHAIN` are all UNVERIFIED. Offline tests use fake providers and prove the wiring (what each model receives, fail-closed paths), not model quality.
 
 ## Common errors
 
@@ -112,6 +144,7 @@ Mock results (`MOCK` files) come from a rule-based fake and prove only that the 
 | `API key missing for provider` | Fill the key in `.env` |
 | `refers to unknown provider` | Provider in chain must be in `PROVIDERS` |
 | `PROVIDERS_UNAVAILABLE` | Check keys, model ids, quota, network |
+| `QUARANTINE_FAILED` (`NOT_CONFIGURED`) | Set `QUARANTINE_CHAIN` in `.env` |
 | Many `INVALID_OUTPUT` | Turn thinking off via `EXTRA_BODY`, try JSON mode, tune the prompt |
 
 ## Notes

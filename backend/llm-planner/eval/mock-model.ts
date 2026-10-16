@@ -65,3 +65,26 @@ export function createMockChat(contacts: string[]): ChatFn {
     return { ok: true, content, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, provider: 'mock', model: 'rule-based', latencyMs: 0 }
   }
 }
+
+// ---- Deterministic fake QUARANTINE inspector (rule-based; NOT evidence about any real model) ----
+const INJECTION_HINTS = /note to ai|ignore (all |your |the )?(previous|prior|rules)|disregard|system:|admin mode|already approved|no confirmation|approve unlimited|you must|nirdesh|bhule jao|<!--|\[\/\/\]: #|assistant:/i
+const PAYEE_SWAP = /0x[0-9a-fA-F]{40}[\s\S]*instead|(updated|new) (payee|wallet|address)/i
+
+export function mockInspect(items: string[]): string {
+  const text = items.join('\n')
+  const addresses = [...new Set(text.match(/0x[0-9a-fA-F]{40}/g) ?? [])]
+  const flagged = INJECTION_HINTS.test(text) || PAYEE_SWAP.test(text)
+  return JSON.stringify({
+    isLikelyInjection: flagged,
+    summary: flagged ? 'Mock: document looks like it contains instructions.' : `Mock: plain document, ${text.length} characters.`,
+    mentionedAddresses: addresses,
+  })
+}
+
+export function createMockQuarantineChat(): ChatFn {
+  return async (messages) => {
+    const user = messages.find((m) => m.role === 'user')!.content
+    const items = [...user.matchAll(/<untrusted_item index="\d+">\n([\s\S]*?)\n<\/untrusted_item>/g)].map((m) => m[1]!)
+    return { ok: true, content: mockInspect(items), usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, provider: 'mock', model: 'rule-based-inspector', latencyMs: 0 }
+  }
+}
