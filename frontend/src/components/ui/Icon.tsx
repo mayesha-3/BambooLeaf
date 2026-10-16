@@ -55,6 +55,7 @@ export const iconPaths: Record<IconName, ReactNode> = {
     </>
   ),
   chevron: <path d="m9 18 6-6-6-6" />,
+  chevronDown: <path d="m6 9 6 6 6-6" />,
   arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
   plus: <path d="M12 5v14M5 12h14" />,
   refresh: (
@@ -116,6 +117,14 @@ export const iconPaths: Record<IconName, ReactNode> = {
       <circle cx="12" cy="12" r="3" />
     </>
   ),
+  eyeOff: (
+    <>
+      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+      <line x1="2" x2="22" y1="2" y2="22" />
+    </>
+  ),
   terminal: <path d="m4 17 6-6-6-6M12 19h8" />,
   layers: (
     <>
@@ -132,6 +141,12 @@ export const iconPaths: Record<IconName, ReactNode> = {
     </>
   ),
   moon: <path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" />,
+  user: (
+    <>
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </>
+  ),
 }
 
 export function Icon({ name, size = 18, className = '' }: { name: IconName; size?: number; className?: string }) {

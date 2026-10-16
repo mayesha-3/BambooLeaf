@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import type { Page, AuditEntry, AuditState } from './types'
+import type { Page, AuditEntry, AuditState, UserProfile } from './types'
 import type { IconName } from './types'
 import { apiBaseUrl } from './config/api'
 import Icon from './components/ui/Icon'
@@ -13,6 +13,7 @@ import WalletPage from './pages/WalletPage'
 import ArenaPage from './pages/ArenaPage'
 import SettingsPage from './pages/SettingsPage'
 import ChatPage from './features/chat/ChatPage'
+import ProfileDropdown from './components/ProfileDropdown'
 
 const navGroups: { label: string; items: { id: Page; label: string; icon: IconName; count?: string; isChat?: boolean }[] }[] = [
   {
@@ -80,6 +81,42 @@ export function App() {
       // ignore
     }
   }, [darkMode])
+
+  // User Profile state with local persistence
+  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
+    try {
+      const saved = localStorage.getItem('bambooleaf_user_profile')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (!parsed.cardName) parsed.cardName = parsed.name ? `${parsed.name.toUpperCase()} · OWNER` : 'MAYES · OWNER'
+        return parsed
+      }
+    } catch {
+      // fallback
+    }
+    return {
+      name: 'Mayes',
+      handle: 'owner@bambooleaf.eth',
+      email: 'mayes@bambooleaf.eth',
+      walletAddress: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+      role: 'Primary Signer · Workspace Owner',
+      avatarColor: 'from-[#65A30D] to-[#84CC16]',
+      bio: 'Guarded agent workspace administrator on Sepolia testnet.',
+      telegram: '@mayes_guard',
+      cardName: 'MAYES · OWNER',
+    }
+  })
+
+  const [showProfileMenu, setShowProfileMenu] = useState(false)
+
+  const handleUpdateProfile = (updated: UserProfile) => {
+    setUserProfile(updated)
+    try {
+      localStorage.setItem('bambooleaf_user_profile', JSON.stringify(updated))
+    } catch {
+      // ignore
+    }
+  }
 
   // Left sidebar resize handler
   const handleSidebarResizeStart = useCallback((e: ReactMouseEvent) => {
@@ -457,18 +494,33 @@ export function App() {
               <Icon name="settings" size={17} />
             </button>
 
-            {/* User Profile Chip (Mayes / Owner Workspace) */}
-            <div
-              onClick={() => navigate('settings')}
-              className="hidden md:flex items-center gap-3 pl-1 pr-2 py-1 rounded-full hover:bg-slate-100/70 dark:hover:bg-slate-800/70 cursor-pointer transition select-none"
-            >
-              <div className="w-9 h-9 rounded-full bg-lime-100 dark:bg-lime-950/60 text-[#65A30D] dark:text-lime-400 font-extrabold flex items-center justify-center shadow-sm">
-                M
-              </div>
-              <div className="text-left leading-tight">
-                <p className="text-xs font-bold text-slate-900 dark:text-slate-100">Mayes</p>
-                <p className="text-[10px] text-slate-400">owner@bambooleaf.eth</p>
-              </div>
+            {/* User Profile Chip + Dropdown (Mayes / Owner Workspace) */}
+            <div className="relative">
+              <button
+                onClick={() => setShowProfileMenu((prev) => !prev)}
+                className="flex items-center gap-2 md:gap-3 pl-1 pr-1.5 md:pr-2.5 py-1 rounded-full hover:bg-slate-100/70 dark:hover:bg-slate-800/70 cursor-pointer transition select-none border border-transparent hover:border-slate-200/80 dark:hover:border-slate-800 focus:outline-none"
+                aria-label="User profile menu"
+                aria-expanded={showProfileMenu}
+              >
+                <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${userProfile.avatarColor} text-white font-extrabold flex items-center justify-center shadow-sm text-sm`}>
+                  {userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'M'}
+                </div>
+                <div className="hidden sm:block text-left leading-tight">
+                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{userProfile.name}</p>
+                  <p className="text-[10px] text-slate-400">{userProfile.handle}</p>
+                </div>
+                <Icon name="chevronDown" size={12} className={`text-slate-400 hidden sm:block transition-transform duration-200 ${showProfileMenu ? 'rotate-180' : ''}`} />
+              </button>
+
+              <ProfileDropdown
+                user={userProfile}
+                isOpen={showProfileMenu}
+                onClose={() => setShowProfileMenu(false)}
+                onNavigate={(dest) => {
+                  setShowProfileMenu(false)
+                  navigate(dest)
+                }}
+              />
             </div>
 
             {/* + Plan goal Button */}
@@ -497,15 +549,21 @@ export function App() {
                   onNavigate={navigate}
                   auditState={auditState}
                   onOpenGoalModal={() => setShowGoalModal(true)}
+                  userProfile={userProfile}
                 />
               )}
               {page === 'activity' && <ActivityPage auditState={auditState} refreshAudit={refreshAudit} />}
               {page === 'approvals' && <ApprovalsPage />}
               {page === 'policy' && <PolicyPage />}
               {page === 'autonomy' && <AutonomyPage />}
-              {page === 'wallet' && <WalletPage />}
+              {page === 'wallet' && <WalletPage userProfile={userProfile} />}
               {page === 'arena' && <ArenaPage />}
-              {page === 'settings' && <SettingsPage />}
+              {page === 'settings' && (
+                <SettingsPage
+                  userProfile={userProfile}
+                  onUpdateProfile={handleUpdateProfile}
+                />
+              )}
             </main>
           )}
         </div>

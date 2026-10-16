@@ -150,12 +150,12 @@ function ToolCallIndicator({ calls }: { calls: ToolCall[] }) {
   return (
     <div className="mt-2 space-y-1.5">
       {calls.map((call, i) => (
-        <div key={i} className="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+        <div key={i} className="flex items-center gap-2 text-[11px] font-mono text-slate-500 dark:text-slate-400">
           {call.status === 'running' && <span className="w-3 h-3 rounded-full border-2 border-[#84CC16] border-t-transparent animate-spin" />}
           {call.status === 'done' && <span className="w-3 h-3 rounded-full bg-[#84CC16] flex items-center justify-center shrink-0"><svg width="7" height="7" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></span>}
           {call.status === 'failed' && <span className="w-3 h-3 rounded-full bg-rose-400 text-white text-[7px] flex items-center justify-center shrink-0">✕</span>}
-          <span className="text-slate-600">{call.name}</span>
-          {call.detail && <span className="text-slate-400">· {call.detail}</span>}
+          <span className="text-slate-600 dark:text-slate-300">{call.name}</span>
+          {call.detail && <span className="text-slate-400 dark:text-slate-500">· {call.detail}</span>}
         </div>
       ))}
     </div>

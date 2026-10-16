@@ -46,7 +46,7 @@ export default function GoalComposer({ onSubmitted }: { onSubmitted?: () => void
         rows={3}
         required
         placeholder="e.g. Send 0.01 ETH to my saved recipient, swap 20 USDC to ETH…"
-        className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-xs sm:text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 focus:border-[#84CC16] focus:bg-white focus:ring-4 focus:ring-lime-500/10 disabled:opacity-60 transition"
+        className="w-full resize-none rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 p-4 text-xs sm:text-sm leading-6 text-slate-800 dark:text-slate-100 outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-[#84CC16] dark:focus:border-lime-500 focus:bg-white dark:focus:bg-slate-900 focus:ring-4 focus:ring-lime-500/10 disabled:opacity-60 transition"
         disabled={submitting}
       />
       {feedback && (
@@ -54,10 +54,10 @@ export default function GoalComposer({ onSubmitted }: { onSubmitted?: () => void
           role="status"
           aria-live="polite"
           className={`mt-3 rounded-2xl p-3 text-xs font-semibold ${feedback.tone === 'red'
-              ? 'bg-rose-50 text-rose-700'
+              ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50'
               : feedback.tone === 'amber'
-                ? 'bg-amber-50 text-amber-800'
-                : 'bg-lime-50 text-lime-800'
+                ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-900/50'
+                : 'bg-lime-50 dark:bg-lime-950/40 text-lime-800 dark:text-lime-300 border border-lime-200 dark:border-lime-900/50'
             }`}
         >
           {feedback.text}
@@ -71,7 +71,7 @@ export default function GoalComposer({ onSubmitted }: { onSubmitted?: () => void
               key={example}
               type="button"
               onClick={() => setGoal(example)}
-              className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium text-slate-600 transition hover:border-[#84CC16] hover:text-[#65A30D]"
+              className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 px-3 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 transition hover:border-[#84CC16] dark:hover:border-lime-500 hover:text-[#65A30D] dark:hover:text-lime-400"
             >
               {example}
             </button>
@@ -80,13 +80,13 @@ export default function GoalComposer({ onSubmitted }: { onSubmitted?: () => void
         <button
           type="submit"
           disabled={submitting || !goal.trim()}
-          className="inline-flex items-center gap-2 rounded-full bg-black px-5 py-2.5 text-xs font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 shadow-sm"
+          className="inline-flex items-center gap-2 rounded-full bg-slate-950 dark:bg-lime-400 dark:text-slate-950 dark:hover:bg-lime-300 px-5 py-2.5 text-xs font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 shadow-sm"
         >
           <Icon name="send" size={13} />
           {submitting ? 'Planning…' : 'Plan goal'}
         </button>
       </div>
-      <p className="mt-3 flex items-center gap-1.5 text-[10px] text-slate-400">
+      <p className="mt-3 flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-slate-400">
         <Icon name="lock" size={12} />Every action is validated by deterministic policy before a signer can act.
       </p>
     </form>
