@@ -6,7 +6,7 @@ import { submitGoal } from '../services/goals.service.tsx'
 async function createGoal(request, response, next) {
   const parsed = goalRequestSchema.safeParse(request.body)
   if (!parsed.success) {
-    response.status(400).json({ error: 'Request body must contain a goal between 1 and 2000 characters.' })
+    response.status(400).json({ error: 'Request body must contain a goal (1–2000 chars). Optional untrusted: array of up to 5 strings, each ≤ 4000 chars.' })
     return
   }
 
@@ -17,7 +17,7 @@ async function createGoal(request, response, next) {
   }
 
   try {
-    const result = await submitGoal(getDatabase(), parsed.data.goal, idempotencyKey)
+    const result = await submitGoal(getDatabase(), parsed.data.goal, idempotencyKey, parsed.data.untrusted)
     response.status(result.statusCode).json(result.body)
   } catch (error) {
     next(error)

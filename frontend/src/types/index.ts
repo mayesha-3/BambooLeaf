@@ -51,4 +51,4 @@ export interface UserProfile {
 
 export type AuditEntry = { seq: number; requestId: string; type: string; createdAt: string; data: Record<string, unknown>; hash: string; prevHash: string }
 export type AuditState = { entries: AuditEntry[]; valid: boolean | null; checked: number; error: string; loading: boolean }
-export type GoalResponse = { status?: string; txHash?: string; reason?: string; error?: string; requestId?: string }
+export type GoalResponse = { status?: string; txHash?: string; reason?: string; error?: string; requestId?: string; code?: string }

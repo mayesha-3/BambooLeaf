@@ -303,7 +303,22 @@ async function getAgentResponse(userText: string): Promise<Message> {
   try {
     const res = await fetch(`${apiBaseUrl}/goal`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ goal: userText }), signal: AbortSignal.timeout(6000) })
     if (res.ok) {
-      const data = await res.json() as { status?: string; txHash?: string; reason?: string }
+      const data = await res.json() as { status?: string; txHash?: string; reason?: string; error?: string; code?: string }
+      // Handle typed planner failure codes
+      if (data.status === 'blocked' && data.code) {
+        const codeMessages: Record<string, string> = {
+          UNTRUSTED_CONTENT_FLAGGED: 'The attached document was flagged as potentially malicious and blocked. No transaction was executed.',
+          QUARANTINE_FAILED: 'Security quarantine check could not complete. Please try again.',
+          INPUT_INVALID: 'Your goal text is invalid — it may be empty, too long, or contain unsupported characters.',
+          MODEL_REFUSED: 'The AI planner refused this request. The action may be unsupported or out of scope.',
+          INVALID_OUTPUT: 'The AI planner returned a malformed response. Please try rephrasing your goal.',
+          UNGROUNDED_RECIPIENT: 'The recipient address could not be verified from your input.',
+          UNKNOWN_CONTACT: 'The named contact was not found in your address book.',
+          PROVIDERS_UNAVAILABLE: 'AI providers are temporarily unreachable. Please try again in a moment.',
+          BUDGET_EXCEEDED: 'Token or quota limit for this planning session was exceeded.',
+        }
+        return { id, role: 'agent', text: `⚠ ${codeMessages[data.code] || data.error || 'Blocked, nothing executed.'}`, toolCalls: [{ name: 'planner.evaluate(goal)', status: 'failed' as const, detail: data.code }], ts: new Date() }
+      }
       return { id, role: 'agent', text: data.txHash ? `Transaction confirmed! Hash: ${data.txHash}` : data.reason || `Status: ${data.status ?? 'submitted'}`, cards: data.txHash ? [{ kind: 'transaction', status: 'confirmed', type: 'Goal execution', amount: '', to: data.txHash, hash: data.txHash } as TransactionCard] : undefined, ts: new Date() }
     }
   } catch { /* fall through */ }
