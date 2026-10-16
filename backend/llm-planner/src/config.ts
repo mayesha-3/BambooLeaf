@@ -131,7 +131,7 @@ export function loadConfig(env: Env, options: LoadOptions = {}): PlannerConfig {
     throw new ConfigError('PLANNER_TOKENS must be a list of symbols like ETH,USDC')
   }
 
-  const network = (env.PLANNER_NETWORK ?? 'sepolia').trim().toLowerCase()
+  const network = (env.PLANNER_NETWORK ?? 'local').trim().toLowerCase()
   if (network !== 'local' && network !== 'sepolia') throw new ConfigError('PLANNER_NETWORK must be local or sepolia')
   const chainIds: Record<Network, number> = {
     local: parseInt10(env.LOCAL_CHAIN_ID, 31337, 'LOCAL_CHAIN_ID', 1, 2 ** 31),

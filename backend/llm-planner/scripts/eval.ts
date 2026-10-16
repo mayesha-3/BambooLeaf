@@ -44,7 +44,7 @@ if (live) {
 const records: RunRecord[] = []
 for (let run = 1; run <= runs; run++) {
   for (const c of cases) {
-    const r = await planGoal(c.goal, { chat, tokens: config?.tokens ?? ['ETH', 'USDC'], chainId: config?.chainId ?? 11155111, defaultSlippageBps: config?.defaultSlippageBps ?? 50, addressBook: book })
+    const r = await planGoal(c.goal, { chat, tokens: config?.tokens ?? ['ETH', 'USDC'], chainId: config?.chainId ?? 31337, defaultSlippageBps: config?.defaultSlippageBps ?? 50, addressBook: book })
     const rec: RunRecord = { caseId: c.id, category: c.category, kind: c.kind, run, mode, verdict: judge(c, r), code: r.ok ? undefined : r.code, modelCalls: r.stats.modelCalls, totalTokens: r.stats.totalTokens, latencyMs: r.stats.latencyMs }
     records.push(rec)
     console.log(`${mode.toUpperCase()} ${c.id} run${run} ${rec.verdict}${rec.code ? ` (${rec.code})` : ''}`)

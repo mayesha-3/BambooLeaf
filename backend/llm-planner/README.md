@@ -48,7 +48,7 @@ npm run eval:live -- --runs 3 --rpm 20 --filter A --limit 10   # real calls, may
 | `PROVIDER_<NAME>_EXTRA_BODY` | JSON object merged into the request (use it to switch thinking off) |
 | `PROVIDER_<NAME>_JSON_MODE` | `true`/`false`: sends `response_format: json_object` |
 | `PLANNER_CHAIN`, `QUARANTINE_CHAIN` | `provider:model,provider:model` in failover order (first colon splits) |
-| `PLANNER_TOKENS` (ETH,USDC), `LOCAL_CHAIN_ID` (31337), `SEPOLIA_CHAIN_ID` (11155111), `PLANNER_NETWORK` (`local` or `sepolia`, default `sepolia`), `PLANNER_DEFAULT_SLIPPAGE_BPS` (50) | Planner defaults |
+| `PLANNER_TOKENS` (ETH,USDC), `LOCAL_CHAIN_ID` (31337), `SEPOLIA_CHAIN_ID` (11155111), `PLANNER_NETWORK` (`local` or `sepolia`, default `local`), `PLANNER_DEFAULT_SLIPPAGE_BPS` (50) | Planner defaults |
 | `LLM_TIMEOUT_MS` (20000), `LLM_MAX_OUTPUT_TOKENS` (600), `LLM_TOTAL_TOKEN_BUDGET` (200000) | Limits |
 
 ## Provider setup
@@ -76,6 +76,10 @@ Failure codes: `INPUT_INVALID`, `MODEL_REFUSED`, `INVALID_OUTPUT`, `UNGROUNDED_R
 **Person 1 (guard) must validate again:** amount/recipient limits, allowed recipients, slippage ceiling (the planner allows up to 10000 bps), number of intents, daily velocity, chain id, token support. Treat the planner as untrusted. A typed attacker address the owner really typed passes the planner by design; the guard stops it.
 
 **Person 4 (API):** return the typed `code` and `message` (never raw model output) on failure; on success return `intents`. `stats` holds model calls and tokens.
+
+### Backend bridge (`src/backend-bridge.ts`)
+
+`planGoal(goal, chainId)` has the same signature as `backend/src/agent/planner.tsx` and returns ONE guard-shaped intent or throws an `Error` whose message starts with a code: any planner failure code, plus `CHAIN_NOT_ALLOWED` (chainId is not `LOCAL_CHAIN_ID` or `SEPOLIA_CHAIN_ID`), `MULTI_INTENT_UNSUPPORTED` (0 or 2+ intents; extras are never dropped), `NOT_REPRESENTABLE` (adapter cannot express it, e.g. slippage > 500) and `GUARD_SHAPE_INVALID` (fails the local copy of the guard schema). Config comes from `process.env`. The address book is empty by default (TODO for the backend: pass `getAddressBook` to `createBridge`), so contact names fail with `UNKNOWN_CONTACT` until it is wired. Nothing in `backend/src` is imported or edited; the backend chooses to import this.
 
 ### Chain ids
 
