@@ -14,6 +14,7 @@ import ArenaPage from './pages/ArenaPage'
 import SettingsPage from './pages/SettingsPage'
 import ChatPage from './features/chat/ChatPage'
 
+
 const navGroups: { label: string; items: { id: Page; label: string; icon: IconName; count?: string; isChat?: boolean }[] }[] = [
   {
     label: 'AGENT',
