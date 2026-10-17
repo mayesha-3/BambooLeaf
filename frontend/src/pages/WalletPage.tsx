@@ -4,6 +4,9 @@ import Badge from '../components/ui/Badge'
 import PageHeading from '../components/ui/PageHeading'
 import Icon from '../components/ui/Icon'
 import type { UserProfile } from '../types'
+import { useLivePrices } from '../features/market/useLivePrices'
+import LiveRatesConverterCard from '../features/market/LiveRatesConverterCard'
+import { getCryptoIcon, PriceTrendBadge } from '../features/market/CryptoIcons'
 
 interface WalletPageProps {
   userProfile?: UserProfile
@@ -36,13 +39,27 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
     }
   }
 
+  const { prices } = useLivePrices(15000)
+  const ethPrice = prices.ETH?.price || 2435.50
+  const ethChange = prices.ETH?.change24h != null
+    ? `${prices.ETH.change24h >= 0 ? '+' : ''}${prices.ETH.change24h.toFixed(1)}%`
+    : '+3.2%'
+
+  const ethBalanceNum = 1.2846
+  const usdcBalanceNum = 264.48
+  const stEthBalanceNum = 0.1500
+
+  const ethVal = ethBalanceNum * ethPrice
+  const stEthVal = stEthBalanceNum * ethPrice
+  const totalBalanceVal = ethVal + usdcBalanceNum + stEthVal
+
   const tokens = [
     {
       symbol: 'ETH',
       name: 'Sepolia Ether',
       balance: '1.2846',
-      value: '$2,576.12',
-      change: '+3.2%',
+      value: `$${ethVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      change: ethChange,
       color: 'bg-lime-50 dark:bg-lime-950/50 text-[#65A30D] dark:text-lime-400',
       mark: 'Ξ',
       contract: 'Native Asset',
@@ -61,8 +78,8 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
       symbol: 'stETH',
       name: 'Lido Staked Ether',
       balance: '0.1500',
-      value: '$301.20',
-      change: '+3.4%',
+      value: `$${stEthVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      change: ethChange,
       color: 'bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400',
       mark: '⚡',
       contract: '0xae7a...B04e',
@@ -300,7 +317,7 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
                     {hideBalances ? (
                       <span className="tracking-[0.25em] text-slate-300 font-bold">••••••••</span>
                     ) : (
-                      <span>$2,840.60 <span className="text-[10px] font-normal text-slate-400">USD</span></span>
+                      <span>${totalBalanceVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-[10px] font-normal text-slate-400">USD</span></span>
                     )}
                   </p>
                 </div>
@@ -439,9 +456,9 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
           {tokens.map((token) => (
             <div key={token.symbol} className="p-5 flex items-center justify-between hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition">
               <div className="flex items-center gap-3.5">
-                <span className={`w-11 h-11 rounded-2xl grid place-items-center font-bold text-lg shadow-sm ${token.color}`}>
-                  {token.mark}
-                </span>
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0">
+                  {getCryptoIcon(token.symbol, 38)}
+                </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{token.symbol}</p>
@@ -461,8 +478,9 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
                   {hideBalances ? (
                     '•••• USD'
                   ) : (
-                    <span>
-                      {token.value} · <span className="text-[#65A30D] dark:text-lime-400 font-bold">{token.change}</span>
+                    <span className="inline-flex items-center gap-2">
+                      <span>{token.value}</span>
+                      <PriceTrendBadge change={parseFloat(token.change) || 0} size="sm" />
                     </span>
                   )}
                 </p>
@@ -471,6 +489,9 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
           ))}
         </div>
       </Card>
+
+      {/* Real-time Market Rates & Currency Converter */}
+      <LiveRatesConverterCard className="mt-6" />
 
       {/* ================= RECEIVE MODAL ================= */}
       {showReceiveModal && (

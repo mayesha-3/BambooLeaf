@@ -3,6 +3,7 @@ import Icon from '../components/ui/Icon'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import GoalComposer from '../components/GoalComposer'
+import LiveRatesConverterCard from '../features/market/LiveRatesConverterCard'
 import type { AuditState, Page, IconName, UserProfile } from '../types'
 
 const demoActivity = [
@@ -668,7 +669,8 @@ export default function OverviewPage({
             </Card>
           </div>
 
-         
+          {/* 2. REAL-TIME CURRENCY RATES & CONVERTER WIDGET */}
+          <LiveRatesConverterCard onOpenGoalModal={onOpenGoalModal} />
         </div>
 
         {/* ================= RIGHT COLUMN (4 COLUMNS) ================= */}

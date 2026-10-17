@@ -14,6 +14,7 @@ import ArenaPage from './pages/ArenaPage'
 import SettingsPage from './pages/SettingsPage'
 import ChatPage from './features/chat/ChatPage'
 import ProfileDropdown from './components/ProfileDropdown'
+import LiveMarketTicker from './features/market/LiveMarketTicker'
 
 const navGroups: { label: string; items: { id: Page; label: string; icon: IconName; count?: string; isChat?: boolean }[] }[] = [
   {
@@ -536,11 +537,14 @@ export function App() {
 
         </header>
 
+        {/* Global Real-Time Market Ticker Bar */}
+        <LiveMarketTicker />
+
         {/* Main Content Body with smooth page transitions */}
         <div key={page} className="flex-1 flex flex-col h-full overflow-hidden animate-page-fade">
           {page === 'chat' ? (
             <div className="flex-1 overflow-hidden">
-              <ChatPage />
+              <ChatPage userProfile={userProfile} />
             </div>
           ) : (
             <main className="p-5 sm:p-7 lg:p-8 flex-1 overflow-y-auto">
