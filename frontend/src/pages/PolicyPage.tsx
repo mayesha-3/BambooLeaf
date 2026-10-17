@@ -30,7 +30,7 @@ export default function PolicyPage() {
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="space-y-6">
           <Card className="p-6">
-            <h2 className="text-base font-bold text-slate-900 mb-1">Spending limits</h2>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Spending limits</h2>
             <p className="text-xs text-slate-400 mb-5">Applied to every proposed transaction</p>
             <div className="space-y-4">
               {[
@@ -38,39 +38,39 @@ export default function PolicyPage() {
                 { label: 'Daily total', value: dailyCap, set: setDailyCap, prefix: '$', suffix: 'USD' },
                 { label: 'Per-recipient daily cap', value: recipientCap, set: setRecipientCap, prefix: '$', suffix: 'USD' },
               ].map((limit) => (
-                <label key={limit.label} className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4 first:border-0 first:pt-0">
-                  <span className="text-xs font-semibold text-slate-700">{limit.label}</span>
-                  <span className="flex items-center rounded-xl border border-slate-200 bg-white px-3">
+                <label key={limit.label} className="flex items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-800/80 pt-4 first:border-0 first:pt-0">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{limit.label}</span>
+                  <span className="flex items-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3">
                     <span className="text-xs text-slate-400">{limit.prefix}</span>
                     <input
                       aria-label={limit.label}
                       value={limit.value}
                       onChange={(event) => limit.set(event.target.value)}
-                      className="w-16 py-2 text-right text-xs font-bold text-slate-800 outline-none"
+                      className="w-16 py-2 text-right text-xs font-bold text-slate-800 dark:text-slate-100 bg-transparent outline-none"
                     />
                     <span className="ml-2 text-[10px] text-slate-400">{limit.suffix}</span>
                   </span>
                 </label>
               ))}
-              <label className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+              <label className="flex items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-800/80 pt-4">
                 <span>
-                  <span className="block text-xs font-semibold text-slate-700">Velocity limit</span>
+                  <span className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Velocity limit</span>
                   <span className="mt-0.5 block text-[10px] text-slate-400">Transactions per 10-minute window</span>
                 </span>
-                <span className="flex items-center rounded-xl border border-slate-200 px-3">
+                <span className="flex items-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3">
                   <input
                     aria-label="Transactions per window"
                     value={velocity}
                     onChange={(event) => setVelocity(event.target.value)}
-                    className="w-10 py-2 text-right text-xs font-bold outline-none"
+                    className="w-10 py-2 text-right text-xs font-bold text-slate-800 dark:text-slate-100 bg-transparent outline-none"
                   />
                   <span className="ml-2 text-[10px] text-slate-400">tx</span>
                 </span>
               </label>
-              <div className="flex justify-end border-t border-slate-100 pt-4">
+              <div className="flex justify-end border-t border-slate-100 dark:border-slate-800/80 pt-4">
                 <button
                   onClick={() => setSaved(true)}
-                  className="rounded-full bg-black px-5 py-2.5 text-xs font-bold text-white hover:bg-slate-800 shadow-sm"
+                  className="rounded-full bg-slate-950 dark:bg-lime-400 dark:text-slate-950 dark:hover:bg-lime-300 px-5 py-2.5 text-xs font-bold text-white hover:bg-slate-800 shadow-sm transition"
                 >
                   Save policy preview
                 </button>
@@ -79,31 +79,31 @@ export default function PolicyPage() {
           </Card>
 
           <Card className="p-6">
-            <h2 className="text-base font-bold text-slate-900 mb-1">Allowed assets & contracts</h2>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Allowed assets & contracts</h2>
             <p className="text-xs text-slate-400 mb-4">Only supported tokens and reviewed protocol routes</p>
             <div className="flex flex-wrap gap-2">
-              <span className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700">◆ ETH <Badge tone="green">Token</Badge></span>
-              <span className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700">◉ USDC <Badge tone="green">Token</Badge></span>
-              <span className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700">⇄ DEX router <Badge tone="neutral">Contract</Badge></span>
+              <span className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">◆ ETH <Badge tone="green">Token</Badge></span>
+              <span className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">◉ USDC <Badge tone="green">Token</Badge></span>
+              <span className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">⇄ DEX router <Badge tone="neutral">Contract</Badge></span>
             </div>
           </Card>
         </div>
 
         <div className="space-y-6">
           <Card className="p-6">
-            <h2 className="text-base font-bold text-slate-900 mb-1">Trusted recipients</h2>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Trusted recipients</h2>
             <p className="text-xs text-slate-400 mb-4">New addresses route to human approval</p>
             <div className="space-y-3">
               {recipients.map((recipient) => (
-                <div key={recipient} className="flex items-center gap-3 border-t border-slate-100 py-3 first:border-0">
-                  <span className="grid h-8 w-8 place-items-center rounded-xl bg-lime-50 text-[#65A30D]">
+                <div key={recipient} className="flex items-center gap-3 border-t border-slate-100 dark:border-slate-800/80 py-3 first:border-0">
+                  <span className="grid h-8 w-8 place-items-center rounded-xl bg-lime-50 dark:bg-lime-950/50 text-[#65A30D] dark:text-lime-400">
                     <Icon name="checkCircle" size={15} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="font-mono text-xs font-bold text-slate-700">{recipient}</p>
+                    <p className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200">{recipient}</p>
                     <p className="text-[10px] text-slate-400">Saved recipient · Sepolia</p>
                   </div>
-                  <button onClick={() => setRecipients((curr) => curr.filter((r) => r !== recipient))} className="text-[10px] text-slate-400 hover:text-rose-600 font-bold">
+                  <button onClick={() => setRecipients((curr) => curr.filter((r) => r !== recipient))} className="text-[10px] text-slate-400 hover:text-rose-600 font-bold transition">
                     Remove
                   </button>
                 </div>
@@ -112,12 +112,12 @@ export default function PolicyPage() {
           </Card>
 
           <Card className="p-6">
-            <h2 className="text-base font-bold text-slate-900 mb-1">Always forbidden</h2>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Always forbidden</h2>
             <p className="text-xs text-slate-400 mb-4">No override path—even by prompt</p>
             <div className="space-y-3">
               {['Unlimited token approvals', 'Unknown contract calls', 'Ownership transfer / delegatecall', 'Intent-to-outcome mismatch'].map((item) => (
-                <div key={item} className="flex items-center gap-2.5 text-xs font-semibold text-slate-700">
-                  <Icon name="lock" size={14} className="text-rose-600" />
+                <div key={item} className="flex items-center gap-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  <Icon name="lock" size={14} className="text-rose-600 dark:text-rose-400" />
                   {item}
                 </div>
               ))}

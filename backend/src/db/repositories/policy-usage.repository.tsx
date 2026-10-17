@@ -1,4 +1,5 @@
-import { Decimal128 } from 'mongodb'
+import { Types } from 'mongoose'
+const { Decimal128 } = Types
 import { COLLECTIONS } from '../collections.tsx'
 
 function isDuplicateKey(error) {

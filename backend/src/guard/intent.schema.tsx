@@ -34,6 +34,7 @@ const intentSchema = z.object({
 
 const goalRequestSchema = z.object({
   goal: z.string().trim().min(1).max(2000),
+  untrusted: z.array(z.string().max(4000)).max(5).optional(),
 }).strict()
 
 export { goalRequestSchema, intentSchema }
