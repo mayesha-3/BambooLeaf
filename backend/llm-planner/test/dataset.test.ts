@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { judge, summarize, type EvalCase } from '../eval/lib.ts'
 import { mockPlan } from '../eval/mock-model.ts'
 import { plan, scripted } from './helpers.ts'
@@ -80,4 +81,41 @@ test('judgeIndirect verdicts and denominators', async () => {
   assert.equal(judgeIndirect(inj, bad), 'contained'); assert.equal(judgeIndirect(inj, send('0x6666666666666666666666666666666666666666')), 'leaked')
   assert.equal(judgeIndirect(inj, send(KARIM)), 'contained'); assert.equal(judgeIndirect(ben, flagged), 'false_positive')
   assert.equal(judgeIndirect(ben, bad), 'fail')
+})
+
+import { judge as judgeCase, summarize as summarizeRuns, summarizeBySet } from '../eval/lib.ts'
+import { listCaseFiles, loadCaseFile } from '../eval/load-cases.ts'
+
+const casesDir = fileURLToPath(new URL('../eval/cases/', import.meta.url))
+const heldA = loadCaseFile<EvalCase>(casesDir, 'heldout-a.json'); const heldB = loadCaseFile<EvalCase>(casesDir, 'heldout-b.json')
+
+test('held-out files: sizes, note, kinds, unique ids across ALL case files, attacker address, saved contacts only', () => {
+  assert.equal(heldA.cases.length, 13); assert.equal(heldB.cases.length, 15)
+  for (const f of [heldA, heldB]) assert.equal(f.note, 'AI-written after seeing the prompt, not independent')
+  const all = listCaseFiles(casesDir).flatMap((f) => loadCaseFile<{ id: string }>(casesDir, f).cases.map((c) => c.id))
+  assert.equal(new Set(all).size, all.length)
+  const text = JSON.stringify([...heldA.cases, ...heldB.cases])
+  assert.ok(text.includes('0x9999999999999999999999999999999999999999'))
+  assert.equal(heldB.cases.filter((c) => c.kind === 'guard_stress').length, 2)
+  assert.equal(heldB.cases.filter((c) => c.kind === 'weird').length, 5)
+  assert.ok([...heldA.cases, ...heldB.cases].every((c) => c.set?.startsWith('heldout')))
+})
+test('held-out prompt hygiene: none of the held-out goals is copied into the planner prompt', () => {
+  const prompt = readFileSync(new URL('../src/prompts/planner.prompt.txt', import.meta.url), 'utf8').toLowerCase()
+  for (const c of [...heldA.cases, ...heldB.cases]) assert.ok(!prompt.includes(c.goal.toLowerCase()), c.id)
+})
+test('guard_stress verdicts are guard tests, never planner false negatives or false positives', async () => {
+  const gs = heldB.cases.find((c) => c.id === 'HB-B12')!
+  const stats = { modelCalls: 1, quarantineCalls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, latencyMs: 0 }
+  const X = '0x9999999999999999999999999999999999999999'
+  const intent = (amount: string, address: string) => ({ ok: true as const, stats, intents: [{ intentId: 'i', chainId: 1, action: 'transfer' as const, from: { token: 'ETH', amount }, recipient: { address, source: 'user_text' as const }, rationale: 'r', sourceRefs: ['user_goal'] as ['user_goal'] }] })
+  assert.equal(judgeCase(gs, intent('3', X)), 'guard_test')
+  assert.equal(judgeCase(gs, intent('4', X)), 'guard_test_mismatch')
+  assert.equal(judgeCase(gs, { ok: false, code: 'MODEL_REFUSED', message: 'm', stats }), 'guard_test_skipped')
+  const rec = (kind: RunRecord['kind'], verdict: RunRecord['verdict'], set = 'heldout-b'): RunRecord => ({ caseId: kind + verdict, category: 'c', kind, run: 1, mode: 'mock', verdict, modelCalls: 1, totalTokens: 0, latencyMs: 0, set })
+  const s = summarizeRuns([rec('guard_stress', 'guard_test'), rec('guard_stress', 'guard_test_skipped'), rec('legit', 'pass'), rec('adversarial', 'refused')], 'mock')
+  assert.deepEqual(s.plannerFalseNegativeRate, { value: 0, numerator: 0, denominator: 1 })
+  assert.deepEqual(s.legitPassRate, { value: 100, numerator: 1, denominator: 1 })
+  assert.deepEqual(s.guardTests, { total: 2, plannerProducedTransfer: 1, plannerRefused: 1, mismatch: 0 })
+  assert.deepEqual(summarizeBySet([rec('legit', 'pass', 'base'), rec('guard_stress', 'guard_test')], 'mock').map((x) => x.set), ['base', 'heldout-b'])
 })

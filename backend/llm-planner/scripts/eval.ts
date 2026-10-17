@@ -1,12 +1,13 @@
-import { readFileSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs'
+import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { loadConfig } from '../src/config.ts'
 import { planGoal } from '../src/planner.ts'
 import { createChainChat, TokenBudget, type ChatFn } from '../src/provider.ts'
 import { createLogger } from '../src/logger.ts'
 import { createMockChat, createMockQuarantineChat } from '../eval/mock-model.ts'
+import { listCaseFiles, loadCaseFile } from '../eval/load-cases.ts'
 import {
-  caseHash, rescore, toRecorded, judge, judgeIndirect, summarize, summarizeIndirect, indirectMarkdown, toMarkdown,
+  bySetMarkdown, summarizeBySet, caseHash, rescore, toRecorded, judge, judgeIndirect, summarize, summarizeIndirect, indirectMarkdown, toMarkdown,
   type EvalCase, type IndirectCase, type RunRecord,
 } from '../eval/lib.ts'
 
@@ -31,8 +32,8 @@ const withIndirect = onlyIndirect || flag('indirect') || (!live && !flag('no-ind
 
 const book = { Rahim: '0x1111111111111111111111111111111111111111', Karim: '0x2222222222222222222222222222222222222222' }
 const casesDir = `${root}eval/cases`
-const load = <T>(f: string) => JSON.parse(readFileSync(`${casesDir}/${f}`, 'utf8')) as T[]
-let cases: EvalCase[] = onlyIndirect ? [] : readdirSync(casesDir).filter((f) => f.endsWith('.json') && f !== 'indirect.json').sort().flatMap((f) => load<EvalCase>(f))
+const load = <T extends object>(f: string) => loadCaseFile<T>(casesDir, f).cases
+let cases: EvalCase[] = onlyIndirect ? [] : listCaseFiles(casesDir).filter((f) => f !== 'indirect.json').flatMap((f) => load<EvalCase>(f))
 let indirect: IndirectCase[] = withIndirect ? load<IndirectCase>('indirect.json') : []
 const keep = (c: { id: string; category: string; kind: string }) => !filter || c.id.includes(filter) || c.category.includes(filter) || c.kind === filter
 cases = cases.filter(keep); indirect = indirect.filter(keep)
@@ -41,11 +42,12 @@ if (limit > 0) { cases = cases.slice(0, limit); indirect = indirect.slice(0, Mat
 function writeOutputs(records: RunRecord[], prefix: string, note?: string) {
   const summary = summarize(records, records[0]?.mode ?? mode)
   const indirectSummary = records.some((r) => r.kind.startsWith('indirect')) ? summarizeIndirect(records) : undefined
-  const markdown = toMarkdown(summary, note) + (indirectSummary ? '\n' + indirectMarkdown(indirectSummary) : '')
+  const setRows = summarizeBySet(records, records[0]?.mode ?? mode)
+  const markdown = toMarkdown(summary, note) + (setRows.length > 1 ? '\n' + bySetMarkdown(setRows) : '') + (indirectSummary ? '\n' + indirectMarkdown(indirectSummary) : '')
   mkdirSync(outDir, { recursive: true })
   const out = `${outDir}/${prefix}-${new Date().toISOString().replace(/[:.]/g, '-')}`
   writeFileSync(`${out}.jsonl`, records.map((r) => JSON.stringify(r)).join('\n') + '\n')
-  writeFileSync(`${out}.summary.json`, JSON.stringify({ ...summary, indirect: indirectSummary }, null, 2) + '\n')
+  writeFileSync(`${out}.summary.json`, JSON.stringify({ ...summary, bySet: setRows, indirect: indirectSummary }, null, 2) + '\n')
   writeFileSync(`${out}.summary.md`, markdown)
   console.log('\n' + markdown)
   console.log(`Saved: ${out}.{jsonl,summary.json,summary.md}`)
@@ -55,7 +57,7 @@ function writeOutputs(records: RunRecord[], prefix: string, note?: string) {
 if (replayFile) {
   const recorded = readFileSync(replayFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as RunRecord)
   const all = new Map<string, EvalCase | IndirectCase>()
-  for (const f of readdirSync(casesDir).filter((n) => n.endsWith('.json')).sort()) for (const c of load<EvalCase | IndirectCase>(f)) all.set(c.id, c)
+  for (const f of listCaseFiles(casesDir)) for (const c of load<EvalCase | IndirectCase>(f)) all.set(c.id, c)
   const { records, skipped } = rescore(recorded.filter((r) => keep({ id: r.caseId, category: r.category, kind: r.kind })), all)
   const origin = recorded[0]?.mode ?? 'mock'
   console.log(`*** REPLAY of ${origin.toUpperCase()} results: re-scoring recorded outputs, NO model calls, no tokens used. ***`)
@@ -92,13 +94,13 @@ const records: RunRecord[] = []
 for (let run = 1; run <= runs; run++) {
   for (const c of cases) {
     const r = await planGoal(c.goal, { ...base, chat })
-    const rec: RunRecord = { caseId: c.id, category: c.category, kind: c.kind, run, mode, verdict: judge(c, r), code: r.ok ? undefined : r.code, modelCalls: r.stats.modelCalls, totalTokens: r.stats.totalTokens, latencyMs: r.stats.latencyMs, caseHash: caseHash(c), result: toRecorded(r) }
+    const rec: RunRecord = { caseId: c.id, category: c.category, kind: c.kind, run, mode, verdict: judge(c, r), code: r.ok ? undefined : r.code, modelCalls: r.stats.modelCalls, totalTokens: r.stats.totalTokens, latencyMs: r.stats.latencyMs, caseHash: caseHash(c), set: c.set, result: toRecorded(r) }
     records.push(rec)
     console.log(`${mode.toUpperCase()} ${c.id} run${run} ${rec.verdict}${rec.code ? ` (${rec.code})` : ''}`)
   }
   for (const c of indirect) {
     const r = await planGoal(c.goal, { ...base, chat, quarantineChat, untrusted: c.untrusted })
-    const rec: RunRecord = { caseId: c.id, category: c.category, kind: c.kind, run, mode, verdict: judgeIndirect(c, r) as RunRecord['verdict'], code: r.ok ? undefined : r.code, modelCalls: r.stats.modelCalls + r.stats.quarantineCalls, totalTokens: r.stats.totalTokens, latencyMs: r.stats.latencyMs, caseHash: caseHash(c), result: toRecorded(r) }
+    const rec: RunRecord = { caseId: c.id, category: c.category, kind: c.kind, run, mode, verdict: judgeIndirect(c, r) as RunRecord['verdict'], code: r.ok ? undefined : r.code, modelCalls: r.stats.modelCalls + r.stats.quarantineCalls, totalTokens: r.stats.totalTokens, latencyMs: r.stats.latencyMs, caseHash: caseHash(c), set: 'indirect', result: toRecorded(r) }
     records.push(rec)
     console.log(`${mode.toUpperCase()} ${c.id} run${run} ${rec.verdict}${rec.code ? ` (${rec.code})` : ''}`)
   }

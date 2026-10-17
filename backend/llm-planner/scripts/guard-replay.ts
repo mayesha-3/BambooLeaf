@@ -1,6 +1,7 @@
-import { readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs'
+import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { defaultPolicyEnv, loadGuard, replayRecords, type AutonomyLevel } from '../eval/guard-replay-lib.ts'
+import { listCaseFiles, loadCaseFile } from '../eval/load-cases.ts'
 import type { EvalCase, IndirectCase, RunRecord } from '../eval/lib.ts'
 
 // OFFLINE replay of recorded planner intents through the real guard code (read-only). No model calls, no keys, no network.
@@ -20,7 +21,7 @@ args.forEach((a, i) => { if (a === '--set' && args[i + 1]) { const [k, ...v] = a
 
 const casesDir = `${root}eval/cases`
 const cases = new Map<string, EvalCase | IndirectCase>()
-for (const f of readdirSync(casesDir).filter((n) => n.endsWith('.json'))) for (const c of JSON.parse(readFileSync(`${casesDir}/${f}`, 'utf8')) as Array<EvalCase | IndirectCase>) cases.set(c.id, c)
+for (const f of listCaseFiles(casesDir)) for (const c of loadCaseFile<EvalCase | IndirectCase>(casesDir, f).cases) cases.set(c.id, c)
 const records = readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as RunRecord)
 
 const guard = await loadGuard()

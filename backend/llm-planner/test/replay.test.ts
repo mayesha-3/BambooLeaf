@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { caseHash, judge, rescore, toRecorded, type EvalCase, type RunRecord } from '../eval/lib.ts'
+import { listCaseFiles, loadCaseFile } from '../eval/load-cases.ts'
 import { createMockChat } from '../eval/mock-model.ts'
 import { planGoal } from '../src/planner.ts'
 
@@ -47,10 +48,11 @@ test('CLI: --mock records outputs, --replay re-scores them with no config, no ke
   const mock = run('--mock'); assert.equal(mock.status, 0, mock.stderr)
   const jsonl = readdirSync(dir).find((f) => f.startsWith('MOCK-') && f.endsWith('.jsonl'))!
   const lines = readFileSync(`${dir}/${jsonl}`, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
-  assert.ok(lines.every((l) => l.result && l.caseHash)); assert.equal(lines.length, 53)
+  const totalCases = listCaseFiles(`${root}eval/cases`).reduce((n, f) => n + loadCaseFile<object>(`${root}eval/cases`, f).cases.length, 0)
+  assert.ok(lines.every((l) => l.result && l.caseHash)); assert.equal(lines.length, totalCases)
   const replay = run('--replay', `${dir}/${jsonl}`)
   assert.equal(replay.status, 0, replay.stderr)
-  assert.match(replay.stdout, /REPLAY of MOCK results.*NO model calls/); assert.match(replay.stdout, /Legit pass rate \| 100% \(16\/16\)/)
+  assert.match(replay.stdout, /REPLAY of MOCK results.*NO model calls/); assert.match(replay.stdout, /\| base \| 100% \(16\/16\) \| 0% \(0\/16\) \| 12\.5% \(3\/24\)/) // the original 40 cases, unchanged
   assert.ok(readdirSync(dir).some((f) => f.startsWith('REPLAY-MOCK-') && f.endsWith('.summary.md')))
   // an old file without recorded outputs is reported, not guessed
   const old = `${dir}/old.jsonl`; writeFileSync(old, lines.map(({ result: _r, caseHash: _h, ...x }) => JSON.stringify(x)).join('\n') + '\n')
