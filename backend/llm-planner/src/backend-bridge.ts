@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { loadConfig, type PlannerConfig } from './config.ts'
+import { ConfigError, loadConfig, type PlannerConfig } from './config.ts'
 import { planGoal as planIntents } from './planner.ts'
 import { createChainChat, TokenBudget, type ChatFn, type FetchFn } from './provider.ts'
 import { toGuardIntent, type GuardShapeIntent } from './adapter.ts'
@@ -30,9 +30,24 @@ export const guardIntentShape = z.strictObject({
   }
 })
 
+export type BridgeCode =
+  | FailureCode
+  | 'CHAIN_NOT_ALLOWED' | 'MULTI_INTENT_UNSUPPORTED' | 'NOT_REPRESENTABLE' | 'GUARD_SHAPE_INVALID'
+  | 'INVALID_ARGUMENTS' | 'CONFIG_INVALID' | 'INTERNAL_ERROR'
+
+/** Third argument of planGoal: `string[]` or `{ untrusted }` and nothing else. Item types are checked by the quarantine (INPUT_INVALID). */
+function normalizeThird(third: unknown): BridgeOptions {
+  if (third === undefined) return {}
+  if (Array.isArray(third)) return { untrusted: third as string[] }
+  if (third !== null && typeof third === 'object' && Object.getPrototypeOf(third) === Object.prototype && Object.keys(third).every((k) => k === 'untrusted')) {
+    return third as BridgeOptions
+  }
+  throw new BridgeError('INVALID_ARGUMENTS', 'third argument must be a string[] or { untrusted: string[] }')
+}
+
 /** Every bridge failure. `message` starts with `code`; `signal` is set for UNTRUSTED_CONTENT_FLAGGED. */
 export class BridgeError extends Error {
-  constructor(readonly code: FailureCode | 'CHAIN_NOT_ALLOWED' | 'MULTI_INTENT_UNSUPPORTED' | 'NOT_REPRESENTABLE' | 'GUARD_SHAPE_INVALID', message: string, readonly signal?: UntrustedSignal) {
+  constructor(readonly code: BridgeCode, message: string, readonly signal?: UntrustedSignal) {
     super(`${code}: ${message}`)
     this.name = 'BridgeError'
   }
@@ -67,7 +82,18 @@ export function createBridge(deps: BridgeDeps = {}) {
 
   /** Third argument: `{ untrusted }`, or a bare `string[]` (the form backend/src/services/goals.service.tsx calls). */
   return async function planGoal(goal: string, chainId: number, third: BridgeOptions | string[] = {}): Promise<GuardShapeIntent> {
-    const options: BridgeOptions = Array.isArray(third) ? { untrusted: third } : third
+    const options = normalizeThird(third) // any other shape: INVALID_ARGUMENTS, before any model call
+    try {
+      return await run(goal, chainId, options)
+    } catch (error) {
+      // The backend reads error.code, so every thrown error carries a string code.
+      if (error instanceof BridgeError) throw error
+      if (error instanceof ConfigError) throw new BridgeError('CONFIG_INVALID', error.message)
+      throw new BridgeError('INTERNAL_ERROR', `unexpected ${error instanceof Error ? error.name : 'error'}`)
+    }
+  }
+
+  async function run(goal: string, chainId: number, options: BridgeOptions): Promise<GuardShapeIntent> {
     config ??= getConfig()
     const allowed = [config.chainIds.local, config.chainIds.sepolia]
     if (!allowed.includes(chainId)) {
