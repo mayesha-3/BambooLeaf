@@ -65,7 +65,9 @@ export function createBridge(deps: BridgeDeps = {}) {
   const getConfig = deps.getConfig ?? (() => loadConfig(process.env))
   const getAddressBook = deps.getAddressBook ?? emptyAddressBook
 
-  return async function planGoal(goal: string, chainId: number, options: BridgeOptions = {}): Promise<GuardShapeIntent> {
+  /** Third argument: `{ untrusted }`, or a bare `string[]` (the form backend/src/services/goals.service.tsx calls). */
+  return async function planGoal(goal: string, chainId: number, third: BridgeOptions | string[] = {}): Promise<GuardShapeIntent> {
+    const options: BridgeOptions = Array.isArray(third) ? { untrusted: third } : third
     config ??= getConfig()
     const allowed = [config.chainIds.local, config.chainIds.sepolia]
     if (!allowed.includes(chainId)) {

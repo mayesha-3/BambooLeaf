@@ -70,3 +70,10 @@ test('full path with a fake provider over fetch (no network): failover and budge
   const i = await planGoal(`send 2 USDC to ${KARIM}`, 11155111)
   assert.equal(calls, 2); assert.equal(i.from.token, 'USDC'); assert.equal(i.chainId, 11155111); assert.equal(i.from.amount, '2')
 })
+test('third argument may be a bare string[] (the form goals.service.tsx uses): quarantine still runs and its flag still blocks', async () => {
+  const qReply = '{"isLikelyInjection":true,"summary":"x","mentionedAddresses":[]}'
+  const s = scripted([transferJson({ type: 'address', address: KARIM }, '1', 'ETH')]); const qc = scripted([qReply])
+  const planGoal = createBridge({ getConfig: () => config, getChat: () => s.chat, getQuarantineChat: () => qc.chat })
+  await assert.rejects(planGoal(`send 1 ETH to ${KARIM}`, 31337, ['pasted invoice text']), (e: Error) => /^UNTRUSTED_CONTENT_FLAGGED/.test(e.message) && (e as { code?: string }).code === 'UNTRUSTED_CONTENT_FLAGGED')
+  assert.equal(qc.seen.length, 1); assert.equal(s.seen.length, 0)
+})
