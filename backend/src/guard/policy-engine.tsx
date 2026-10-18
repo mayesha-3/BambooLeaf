@@ -34,6 +34,18 @@ function readPolicyConfig(environment = process.env) {
   }
 }
 
+// Add this new function to allow read-only actions
+function evaluateReadOnly(intent, config) {
+  if (intent.action === 'read_balance' || intent.action === 'read_quote') {
+    return {
+      allowed: true,
+      reason: 'Read-only action is always allowed.',
+      isReadOnly: true
+    }
+  }
+  return null
+}
+
 async function evaluateSwap(intent, { provider, recipient, config }) {
   if (intent.action !== 'swap' || !intent.to?.token || !intent.from.amount) {
     return { allowed: false, reason: 'Swap intent is incomplete.' }
@@ -145,4 +157,5 @@ function evaluateNativeTransfer(intent, config) {
   }
 }
 
-export { evaluateNativeTransfer, evaluateSwap, parsePositiveWei, readPolicyConfig }
+// Export the new function here
+export { evaluateNativeTransfer, evaluateSwap, evaluateReadOnly, parsePositiveWei, readPolicyConfig }

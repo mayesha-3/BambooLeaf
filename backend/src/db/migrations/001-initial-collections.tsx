@@ -15,6 +15,7 @@ async function migrateInitialCollections(database) {
   for (const name of [
     COLLECTIONS.auditHeads,
     COLLECTIONS.goals,
+    COLLECTIONS.approvals,
     COLLECTIONS.policyUsage,
     COLLECTIONS.deviceAccounts,
     COLLECTIONS.deviceChallenges,
@@ -25,6 +26,21 @@ async function migrateInitialCollections(database) {
   ]) {
     if (!existing.has(name)) {
       await database.createCollection(name)
+    }
+  }
+
+  if (existing.has('approvals')) {
+    const legacyApprovals = await database.collection('approvals').find({ approvalId: { $exists: true } }).toArray()
+    if (legacyApprovals.length > 0) {
+      await database.collection(COLLECTIONS.approvals).bulkWrite(
+        legacyApprovals.map((approval) => ({
+          updateOne: {
+            filter: { approvalId: approval.approvalId },
+            update: { $setOnInsert: approval },
+            upsert: true,
+          },
+        })),
+      )
     }
   }
 }

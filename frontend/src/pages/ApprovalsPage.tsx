@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Icon from '../components/ui/Icon'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import PageHeading from '../components/ui/PageHeading'
 
 interface ApprovalItem {
+  approvalId: string
   id: string
   action: string
   amount: string
@@ -17,52 +18,103 @@ interface ApprovalItem {
   digest: string
   tier: 'Tier 2 · Owner Approval Required' | 'Tier 3 · High Value Multi-sig'
   calldata: string
+  chainId?: number
 }
 
-const initialApprovals: ApprovalItem[] = [
-  {
-    id: 'ap-1042',
-    action: 'Swap USDC → ETH',
-    amount: '12.00 USDC',
-    receive: '~0.0041 ETH',
-    recipient: '0xe2463837df0a08d3d1728a0cef444a57a879b1dd',
+interface ApprovalRecord {
+  approvalId: string
+  digest: string
+  expiresAt: number
+  tier: string
+  reasons: string[]
+  intent: {
+    action: string
+    chainId?: number
+    from?: { token?: string; amount?: string }
+    to?: { token?: string }
+    recipient?: string
+  }
+  txRequests: Array<{ to: string; data: string; description: string }>
+}
+
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
+
+function toApprovalItem(approval: ApprovalRecord): ApprovalItem {
+  const { intent } = approval
+  const fromToken = intent.from?.token ?? 'Unknown token'
+  const amount = intent.from?.amount ?? 'Unknown amount'
+  const action = intent.action === 'swap'
+    ? `Swap ${fromToken} → ${intent.to?.token ?? 'unknown token'}`
+    : `${intent.action === 'transfer' ? 'Transfer' : intent.action} ${amount} ${fromToken}`
+  const destination = intent.recipient ?? approval.txRequests[0]?.to ?? 'Unknown recipient'
+
+  return {
+    approvalId: approval.approvalId,
+    id: approval.approvalId.slice(0, 8),
+    action,
+    amount: `${amount} ${fromToken}`,
+    receive: intent.to?.token ?? 'External Recipient',
+    recipient: destination,
     risk: 'T2 Policy Check',
-    reason: 'Exceeds autonomous auto-swap threshold ($10.00). Slippage cap validated at 0.50%.',
-    secondsLeft: 245,
+    reason: approval.reasons.join(' '),
+    secondsLeft: Math.max(0, Math.ceil((approval.expiresAt - Date.now()) / 1000)),
     tone: 'amber',
-    digest: '0xa7b98d249f01bb49858de59bbd8b9bc2b84a9e102fca9b1192',
+    digest: approval.digest,
     tier: 'Tier 2 · Owner Approval Required',
-    calldata: '0x38ed1739000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48...',
-  },
-  {
-    id: 'ap-1041',
-    action: 'Transfer ETH',
-    amount: '0.025 ETH',
-    receive: 'External Recipient',
-    recipient: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
-    risk: 'Unsaved Recipient',
-    reason: 'Destination address is not present in saved contacts. Requires explicit approval before signer acts.',
-    secondsLeft: 580,
-    tone: 'rose',
-    digest: '0xf41b9c77102eacb92019ffab52817d9834ba12891901eeaa83',
-    tier: 'Tier 2 · Owner Approval Required',
-    calldata: '0x',
-  },
-]
+    calldata: approval.txRequests.map((tx) => `${tx.description}: ${tx.data}`).join('\n'),
+    chainId: intent.chainId,
+  }
+}
+
+async function getPendingApprovals(): Promise<ApprovalItem[]> {
+  const response = await fetch(`${apiBaseUrl}/approvals`)
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error || 'Could not load pending approvals.')
+  return (data.approvals as ApprovalRecord[]).map(toApprovalItem)
+}
 
 export default function ApprovalsPage() {
-  const [items, setItems] = useState<ApprovalItem[]>(initialApprovals)
-  const [notice, setNotice] = useState<{ message: string; tone: 'green' | 'rose' } | null>(null)
+  const [items, setItems] = useState<ApprovalItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null)
+  const [notice, setNotice] = useState<{ message: string; tone: 'green' | 'rose'; txHash?: string } | null>(null)
   const [inspectingItem, setInspectingItem] = useState<ApprovalItem | null>(null)
 
-  // Countdown timer
+  useEffect(() => {
+    let active = true
+    getPendingApprovals()
+      .then((approvals) => {
+        if (active) setItems(approvals)
+      })
+      .catch((error: unknown) => {
+        if (active) setLoadError(error instanceof Error ? error.message : 'Could not load pending approvals.')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  function refreshApprovals() {
+    setLoading(true)
+    setLoadError(null)
+    getPendingApprovals()
+      .then(setItems)
+      .catch((error: unknown) => {
+        setLoadError(error instanceof Error ? error.message : 'Could not load pending approvals.')
+      })
+      .finally(() => setLoading(false))
+  }
+
   useEffect(() => {
     const timer = setInterval(() => {
-      setItems((prev) =>
-        prev
-          .map((item) => ({ ...item, secondsLeft: Math.max(0, item.secondsLeft - 1) }))
-          .filter((item) => item.secondsLeft > 0)
-      )
+      setItems((current) => current.map((item) => ({
+        ...item,
+        secondsLeft: Math.max(0, item.secondsLeft - 1),
+      })))
     }, 1000)
     return () => clearInterval(timer)
   }, [])
@@ -73,41 +125,36 @@ export default function ApprovalsPage() {
     return `${m}:${s < 10 ? '0' : ''}${s}`
   }
 
-  function decide(item: ApprovalItem, approved: boolean) {
-    setItems((current) => current.filter((it) => it.id !== item.id))
-    if (approved) {
-      setNotice({
-        message: `✓ Approval confirmed for ${item.id}. Transaction digest signed: ${item.digest.slice(0, 16)}…`,
-        tone: 'green',
+  async function decide(item: ApprovalItem, approved: boolean) {
+    setPendingActionId(item.approvalId)
+    setNotice(null)
+    try {
+      const response = await fetch(`${apiBaseUrl}/approvals/${item.approvalId}/${approved ? 'approve' : 'reject'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
       })
-    } else {
+      const data = await response.json()
+      const expectedStatus = approved ? 'confirmed' : 'rejected'
+      if (!response.ok || data.status !== expectedStatus) {
+        throw new Error(data.error || `Approval request failed with status ${response.status}.`)
+      }
+      setItems((current) => current.filter((entry) => entry.approvalId !== item.approvalId))
       setNotice({
-        message: `✗ Action ${item.id} rejected. Signer request invalidated and audit log recorded.`,
+        message: approved
+          ? `Transaction confirmed for approval ${item.id}.`
+          : `Approval ${item.id} was rejected.`,
+        tone: approved ? 'green' : 'rose',
+        txHash: approved ? data.txHash : undefined,
+      })
+      setInspectingItem(null)
+    } catch (error) {
+      setNotice({
+        message: error instanceof Error ? error.message : 'Approval request failed.',
         tone: 'rose',
       })
+    } finally {
+      setPendingActionId(null)
     }
-    setInspectingItem(null)
-  }
-
-  function resetDemoQueue() {
-    setItems([
-      ...initialApprovals,
-      {
-        id: `ap-${Math.floor(1000 + Math.random() * 9000)}`,
-        action: 'Approve USDC Spend',
-        amount: '50.00 USDC',
-        receive: 'Uniswap V2 Router',
-        recipient: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D',
-        risk: 'Allowance Grant',
-        reason: 'ERC-20 token spend allowance request. Strict allowance matching transaction amount only.',
-        secondsLeft: 300,
-        tone: 'green',
-        digest: '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(''),
-        tier: 'Tier 2 · Owner Approval Required',
-        calldata: '0x095ea7b30000000000000000000000007a250d5630b4cf539739df2c5dacb4c659f2488d...',
-      },
-    ])
-    setNotice(null)
   }
 
   return (
@@ -140,13 +187,25 @@ export default function ApprovalsPage() {
           }`}
         >
           <span>{notice.message}</span>
+          {notice.txHash && (
+            <span className="ml-3 break-all font-mono text-[10px]">{notice.txHash}</span>
+          )}
           <button onClick={() => setNotice(null)} className="text-slate-400 hover:text-slate-600 font-bold ml-2">
             ✕
           </button>
         </div>
       )}
 
-      {items.length ? (
+      {loading ? (
+        <Card className="p-10 text-center text-sm text-slate-500">Loading pending approvals…</Card>
+      ) : loadError ? (
+        <Card className="p-10 text-center">
+          <p role="alert" className="text-sm text-rose-600 dark:text-rose-400">{loadError}</p>
+          <button onClick={refreshApprovals} className="mt-4 rounded-full border border-slate-200 dark:border-slate-700 px-4 py-2 text-xs font-bold">
+            Retry
+          </button>
+        </Card>
+      ) : items.length ? (
         <div className="space-y-4">
           {items.map((item) => (
             <Card key={item.id} className="p-6 transition hover:border-slate-300 dark:hover:border-slate-700">
@@ -215,14 +274,18 @@ export default function ApprovalsPage() {
 
                 <div className="flex gap-2">
                   <button
+                    type="button"
+                    disabled={pendingActionId !== null}
                     onClick={() => decide(item, false)}
-                    className="rounded-full border border-slate-200 dark:border-slate-700 px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+                    className="rounded-full border border-slate-200 dark:border-slate-700 px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition disabled:opacity-50"
                   >
-                    Reject
+                    {pendingActionId === item.approvalId ? 'Processing…' : 'Reject'}
                   </button>
                   <button
+                    type="button"
+                    disabled={pendingActionId !== null}
                     onClick={() => decide(item, true)}
-                    className="rounded-full bg-slate-950 dark:bg-lime-400 dark:text-slate-950 dark:hover:bg-lime-300 px-5 py-2 text-xs font-bold text-white hover:bg-slate-800 shadow-sm transition"
+                    className="rounded-full bg-slate-950 dark:bg-lime-400 dark:text-slate-950 dark:hover:bg-lime-300 px-5 py-2 text-xs font-bold text-white hover:bg-slate-800 shadow-sm transition disabled:opacity-50"
                   >
                     Authorize & Sign
                   </button>
@@ -234,7 +297,7 @@ export default function ApprovalsPage() {
                 <div className="mt-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-900 p-4 text-xs font-mono text-slate-100 space-y-2 animate-in fade-in duration-150">
                   <div className="flex justify-between items-center text-slate-400 text-[11px] pb-1 border-b border-slate-800">
                     <span>EIP-712 Digest Authentication</span>
-                    <span>Chain ID: 11155111 (Sepolia)</span>
+                    <span>Chain ID: {item.chainId ?? 'unknown'}</span>
                   </div>
                   <div>
                     <span className="text-slate-400">Digest Hash: </span>
@@ -257,10 +320,10 @@ export default function ApprovalsPage() {
           <h2 className="mt-4 text-sm font-bold text-slate-900 dark:text-white">Queue is clear</h2>
           <p className="mt-1 text-xs text-slate-400">There are no pending approvals requiring human review.</p>
           <button
-            onClick={resetDemoQueue}
+            onClick={refreshApprovals}
             className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:border-lime-500 transition"
           >
-            <Icon name="refresh" size={13} /> Reload Simulated Approvals
+            <Icon name="refresh" size={13} /> Refresh approvals
           </button>
         </Card>
       )}

@@ -97,46 +97,86 @@ function PolicyCardView({ card }: { card: PolicyCard }) {
 }
 
 function ApprovalCardView({ card }: { card: ApprovalCard }) {
-  const [status, setStatus] = useState<'idle' | 'loading' | 'approved' | 'rejected' | 'error'>('idle')
+  const [status, setStatus] = useState<'checking' | 'idle' | 'loading' | 'approved' | 'rejected' | 'closed' | 'error'>(
+    card.approvalId ? 'checking' : 'error',
+  )
+  const [errorMessage, setErrorMessage] = useState(
+    card.approvalId ? '' : 'Approval ID is missing. Submit the transaction again.',
+  )
+  const [txHash, setTxHash] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    if (!card.approvalId) return
+    fetch(`${apiBaseUrl}/approvals`)
+      .then(async (response) => {
+        const data: { approvals?: Array<{ approvalId?: string }>; error?: string } = await response.json()
+        if (!response.ok) throw new Error(data.error || 'Could not verify approval status.')
+        if (!Array.isArray(data.approvals)) throw new Error('Approval status response was invalid.')
+        return data.approvals.some((approval) => approval.approvalId === card.approvalId)
+      })
+      .then((isPending) => {
+        if (active) setStatus(isPending ? 'idle' : 'closed')
+      })
+      .catch((error: unknown) => {
+        if (!active) return
+        setErrorMessage(error instanceof Error ? error.message : 'Could not verify approval status.')
+        setStatus('error')
+      })
+    return () => {
+      active = false
+    }
+  }, [card.approvalId])
 
   const handleApprove = async () => {
     if (!card.approvalId) {
-      setStatus('approved')
-      card.onApprove?.()
+      setErrorMessage('Approval ID is missing. Submit the transaction again.')
+      setStatus('error')
       return
     }
     setStatus('loading')
     try {
-      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
       const res = await fetch(`${apiBaseUrl}/approvals/${card.approvalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
       const data = await res.json()
       if (res.ok && data.status === 'confirmed') {
+        setTxHash(typeof data.txHash === 'string' ? data.txHash : null)
         setStatus('approved')
         card.onApprove?.()
       } else {
+        setErrorMessage(data.error || `Approval failed with status ${res.status}.`)
         setStatus('error')
-        console.error('Approval failed:', data.error)
       }
     } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Could not reach the approval service.')
       setStatus('error')
-      console.error('Failed to connect to backend', err)
     }
   }
 
   const handleReject = async () => {
+    if (!card.approvalId) {
+      setErrorMessage('Approval ID is missing. Submit the transaction again.')
+      setStatus('error')
+      return
+    }
     setStatus('loading')
     try {
-      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
-      await fetch(`${apiBaseUrl}/approvals/${card.approvalId}/reject`, {
+      const res = await fetch(`${apiBaseUrl}/approvals/${card.approvalId}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
-    } catch (err) {}
-    setStatus('rejected')
-    card.onReject?.()
+      const data = await res.json()
+      if (!res.ok || data.status !== 'rejected') {
+        throw new Error(data.error || 'Backend did not reject the approval.')
+      }
+      setStatus('rejected')
+      card.onReject?.()
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Could not reject the approval.')
+      setStatus('error')
+    }
   }
 
   return (
@@ -155,14 +195,16 @@ function ApprovalCardView({ card }: { card: ApprovalCard }) {
           <button onClick={handleReject} className="flex-1 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 rounded-xl py-2 text-[11px] font-bold border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition flex items-center justify-center gap-1.5 font-display"><Icon d={Icons.x} size={12} /> Reject</button>
         </div>
       )}
-      {status === 'loading' && (
+      {(status === 'checking' || status === 'loading') && (
         <div className="mt-3 rounded-xl py-2 flex justify-center items-center text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500">
-          <span className="w-3 h-3 rounded-full border-2 border-slate-400 border-t-transparent animate-spin mr-2" /> Processing...
+          <span className="w-3 h-3 rounded-full border-2 border-slate-400 border-t-transparent animate-spin mr-2" />
+          {status === 'checking' ? 'Checking approval status...' : 'Processing...'}
         </div>
       )}
-      {status === 'approved' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-lime-50 dark:bg-lime-950/60 text-[#65A30D] dark:text-lime-400">✓ Transaction approved & sent</div>}
+      {status === 'approved' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-lime-50 dark:bg-lime-950/60 text-[#65A30D] dark:text-lime-400">✓ Transaction confirmed{txHash ? <span className="mt-1 block break-all font-mono text-[10px]">{txHash}</span> : null}</div>}
       {status === 'rejected' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">✗ Transaction rejected</div>}
-      {status === 'error' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">⚠ Failed. Check backend/Anvil.</div>}
+      {status === 'closed' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">This approval is no longer pending. Check the Approval Queue for its latest status.</div>}
+      {status === 'error' && <div role="alert" className="mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">⚠ {errorMessage}</div>}
     </div>
   )
 }
