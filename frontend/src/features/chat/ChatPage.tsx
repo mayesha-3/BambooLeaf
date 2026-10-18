@@ -5,7 +5,7 @@ import { useApprovals } from '../../lib/hooks/useApprovals'
 interface BalanceCard { kind: 'balance'; eth: string; usdc: string; total: string; change: string }
 interface TransactionCard { kind: 'transaction'; status: 'confirmed' | 'pending' | 'blocked'; type: string; amount: string; to: string; hash?: string; reason?: string }
 interface PolicyCard { kind: 'policy'; perTxCap: string; dailyCap: string; usedToday: string; autonomyLevel: string }
-interface ApprovalCard { kind: 'approval'; description: string; amount: string; expires: string; onApprove?: () => void; onReject?: () => void }
+interface ApprovalCard { kind: 'approval'; description: string; amount: string; expires: string; approvalId?: string; onApprove?: () => void; onReject?: () => void }
 interface SwapCard { kind: 'swap'; from: string; to: string; amount: string; rate: string; status: 'proposed' | 'approved' | 'blocked' }
 type RichCard = BalanceCard | TransactionCard | PolicyCard | ApprovalCard | SwapCard
 type MessageRole = 'user' | 'agent' | 'system'
@@ -98,7 +98,48 @@ function PolicyCardView({ card }: { card: PolicyCard }) {
 }
 
 function ApprovalCardView({ card }: { card: ApprovalCard }) {
-  const [voted, setVoted] = useState<'approved' | 'rejected' | null>(null)
+  const [status, setStatus] = useState<'idle' | 'loading' | 'approved' | 'rejected' | 'error'>('idle')
+
+  const handleApprove = async () => {
+    if (!card.approvalId) {
+      setStatus('approved')
+      card.onApprove?.()
+      return
+    }
+    setStatus('loading')
+    try {
+      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
+      const res = await fetch(`${apiBaseUrl}/approvals/${card.approvalId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const data = await res.json()
+      if (res.ok && data.status === 'confirmed') {
+        setStatus('approved')
+        card.onApprove?.()
+      } else {
+        setStatus('error')
+        console.error('Approval failed:', data.error)
+      }
+    } catch (err) {
+      setStatus('error')
+      console.error('Failed to connect to backend', err)
+    }
+  }
+
+  const handleReject = async () => {
+    setStatus('loading')
+    try {
+      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
+      await fetch(`${apiBaseUrl}/approvals/${card.approvalId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+    } catch (err) {}
+    setStatus('rejected')
+    card.onReject?.()
+  }
+
   return (
     <div className="mt-2 rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 p-4 max-w-[340px]">
       <div className="flex items-start gap-3">
@@ -109,14 +150,20 @@ function ApprovalCardView({ card }: { card: ApprovalCard }) {
           <div className="flex gap-2 text-[11px] font-bold mt-1"><span className="text-amber-700 dark:text-amber-400">{card.amount}</span><span className="text-slate-400">·</span><span className="text-slate-500 dark:text-slate-400">Expires {card.expires}</span></div>
         </div>
       </div>
-      {!voted ? (
+      {status === 'idle' && (
         <div className="flex gap-2 mt-3">
-          <button onClick={() => { setVoted('approved'); card.onApprove?.() }} className="flex-1 bg-slate-900 hover:bg-black dark:bg-lime-400 dark:hover:bg-lime-300 text-white dark:text-slate-950 rounded-xl py-2 text-[11px] font-bold transition flex items-center justify-center gap-1.5 font-display"><Icon d={Icons.check} size={12} /> Approve</button>
-          <button onClick={() => { setVoted('rejected'); card.onReject?.() }} className="flex-1 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 rounded-xl py-2 text-[11px] font-bold border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition flex items-center justify-center gap-1.5 font-display"><Icon d={Icons.x} size={12} /> Reject</button>
+          <button onClick={handleApprove} className="flex-1 bg-slate-900 hover:bg-black dark:bg-lime-400 dark:hover:bg-lime-300 text-white dark:text-slate-950 rounded-xl py-2 text-[11px] font-bold transition flex items-center justify-center gap-1.5 font-display"><Icon d={Icons.check} size={12} /> Approve</button>
+          <button onClick={handleReject} className="flex-1 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 rounded-xl py-2 text-[11px] font-bold border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition flex items-center justify-center gap-1.5 font-display"><Icon d={Icons.x} size={12} /> Reject</button>
         </div>
-      ) : (
-        <div className={`mt-3 rounded-xl py-2 text-center text-[11px] font-bold ${voted === 'approved' ? 'bg-lime-50 dark:bg-lime-950/60 text-[#65A30D] dark:text-lime-400' : 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'}`}>{voted === 'approved' ? '✓ Transaction approved' : '✗ Transaction rejected'}</div>
       )}
+      {status === 'loading' && (
+        <div className="mt-3 rounded-xl py-2 flex justify-center items-center text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500">
+          <span className="w-3 h-3 rounded-full border-2 border-slate-400 border-t-transparent animate-spin mr-2" /> Processing...
+        </div>
+      )}
+      {status === 'approved' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-lime-50 dark:bg-lime-950/60 text-[#65A30D] dark:text-lime-400">✓ Transaction approved & sent</div>}
+      {status === 'rejected' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">✗ Transaction rejected</div>}
+      {status === 'error' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">⚠ Failed. Check backend/Anvil.</div>}
     </div>
   )
 }
@@ -225,9 +272,18 @@ function TypingIndicator() {
 
 function ContextPanel({ width, onResizeStart, userProfile }: { width: number; onResizeStart: (e: React.MouseEvent) => void; userProfile?: UserProfile }) {
   const { count: approvalsCount } = useApprovals()
+  const [walletData, setWalletData] = useState<any>(null)
+  const apiUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
+
+  useEffect(() => {
+    fetch(`${apiUrl}/wallet/balance`)
+      .then(res => res.json())
+      .then(data => setWalletData(data))
+      .catch(console.error)
+  }, [apiUrl])
+
   return (
     <aside className="hidden xl:flex flex-col shrink-0 border-l border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0c1220] overflow-y-auto relative transition-colors" style={{ width }}>
-      {/* Resize handle */}
       <div
         onMouseDown={onResizeStart}
         className="absolute top-0 left-0 w-3 h-full cursor-col-resize z-10 group flex items-center justify-center transition-colors hover:bg-[#84CC16]/8"
@@ -258,10 +314,10 @@ function ContextPanel({ width, onResizeStart, userProfile }: { width: number; on
             </div>
           </div>
         )}
+        
         <div>
           <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2.5">Wallet</p>
           <div className="rounded-2xl p-4 text-white overflow-hidden relative shadow-sm" style={{ background: 'linear-gradient(135deg, #82C91E 0%, #65A30D 100%)' }}>
-            {/* Decorative background pattern */}
             <div className="absolute top-0 right-0 w-24 h-full opacity-[0.12] pointer-events-none">
               <svg viewBox="0 0 80 120" fill="none" className="w-full h-full">
                 <circle cx="60" cy="30" r="28" stroke="white" strokeWidth="2" />
@@ -273,10 +329,12 @@ function ContextPanel({ width, onResizeStart, userProfile }: { width: number; on
             <div className="relative z-[1] flex items-start justify-between">
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-bold text-lime-50/70 uppercase tracking-wider">Total balance</p>
-                <p className="text-2xl font-extrabold mt-1 tracking-tight">$2,840.60</p>
+                <p className="text-2xl font-extrabold mt-1 tracking-tight">
+                  {walletData ? `${walletData.balanceEth} ETH` : 'Loading...'}
+                </p>
                 <div className="flex gap-4 mt-3 text-[11px]">
-                  <div><p className="text-lime-50/70">ETH</p><p className="font-bold">0.72 ETH</p></div>
-                  <div><p className="text-lime-50/70">USDC</p><p className="font-bold">$1,079.43</p></div>
+                  <div><p className="text-lime-50/70">ETH</p><p className="font-bold">{walletData ? walletData.balanceEth : '-'}</p></div>
+                  <div><p className="text-lime-50/70">USDC</p><p className="font-bold">{walletData ? walletData.balanceUsdc : '-'}</p></div>
                 </div>
               </div>
               <div className="w-10 h-10 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center shrink-0 ml-3 mt-1">
@@ -288,6 +346,7 @@ function ContextPanel({ width, onResizeStart, userProfile }: { width: number; on
             </div>
           </div>
         </div>
+
         <div>
           <div className="flex items-center justify-between mb-2.5">
             <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Pending approvals</p>
@@ -305,22 +364,11 @@ function ContextPanel({ width, onResizeStart, userProfile }: { width: number; on
           <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2.5">Active guardrails</p>
           <div className="rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 p-4 space-y-3">
             <div>
-              <div className="flex justify-between text-[11px] mb-1.5"><span className="text-slate-500 dark:text-slate-400 font-medium">Daily cap used</span><span className="font-bold text-slate-900 dark:text-white">$65.40 / $150</span></div>
-              <div className="h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden"><div className="h-full rounded-full bg-[#84CC16]" style={{ width: '43.6%' }} /></div>
+              <div className="flex justify-between text-[11px] mb-1.5"><span className="text-slate-500 dark:text-slate-400 font-medium">Daily cap used</span><span className="font-bold text-slate-900 dark:text-white">$0.00 / $150</span></div>
+              <div className="h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden"><div className="h-full rounded-full bg-[#84CC16]" style={{ width: '0%' }} /></div>
             </div>
             <div className="flex justify-between text-[11px]"><span className="text-slate-500 dark:text-slate-400 font-medium">Per-tx max</span><span className="font-bold text-slate-900 dark:text-white">$25.00</span></div>
             <div className="flex justify-between text-[11px]"><span className="text-slate-500 dark:text-slate-400 font-medium">Autonomy level</span><span className="font-bold text-[#65A30D] dark:text-lime-400">L2 · Standard</span></div>
-          </div>
-        </div>
-        <div>
-          <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2.5">Recent actions</p>
-          <div className="space-y-1.5">
-            {[{ text: 'Balance checked', time: '2 min ago', tone: 'green' }, { text: 'Policy validated', time: '18 min ago', tone: 'green' }, { text: 'Transfer confirmed', time: '1 hr ago', tone: 'green' }, { text: 'Recipient blocked', time: 'Yesterday', tone: 'red' }].map((item, i) => (
-              <div key={i} className="flex items-center justify-between text-[11px]">
-                <div className="flex items-center gap-2"><span className={`w-1.5 h-1.5 rounded-full shrink-0 ${item.tone === 'green' ? 'bg-[#84CC16]' : 'bg-rose-400'}`} /><span className="text-slate-700 dark:text-slate-300 font-medium">{item.text}</span></div>
-                <span className="text-slate-400 dark:text-slate-500">{item.time}</span>
-              </div>
-            ))}
           </div>
         </div>
       </div>
@@ -328,20 +376,10 @@ function ContextPanel({ width, onResizeStart, userProfile }: { width: number; on
   )
 }
 
-const demoMessages: Message[] = [
-  { id: '0', role: 'system', text: 'BambooLeaf Agent connected · Sepolia testnet · Policy active', ts: new Date(Date.now() - 300000) },
-  { id: '1', role: 'user', text: 'Check my wallet balance', ts: new Date(Date.now() - 290000) },
-  { id: '2', role: 'agent', text: "Here's your current guarded wallet balance on Sepolia testnet:", toolCalls: [{ name: 'wallet.getBalance()', status: 'done', detail: '0.72 ETH, 1079.43 USDC' }], cards: [{ kind: 'balance', eth: '0.72 ETH', usdc: '$1,079.43', total: '$2,840.60', change: '+2.4%' } as BalanceCard], ts: new Date(Date.now() - 288000) },
-  { id: '3', role: 'user', text: 'What are my current spending limits?', ts: new Date(Date.now() - 180000) },
-  { id: '4', role: 'agent', text: "Your deterministic policy limits are active. All transactions are validated before signing:", toolCalls: [{ name: 'policy.getLimits()', status: 'done', detail: 'perTx: $25, daily: $150' }], cards: [{ kind: 'policy', perTxCap: '$25.00', dailyCap: '$150.00', usedToday: '$65.40', autonomyLevel: 'L2 · Standard' } as PolicyCard], ts: new Date(Date.now() - 178000) },
-  { id: '5', role: 'user', text: 'Swap 12 USDC to ETH', ts: new Date(Date.now() - 60000) },
-  { id: '6', role: 'agent', text: "This swap exceeds the auto-approve threshold ($10), so it needs your T2 approval:", toolCalls: [{ name: 'policy.validate(swap)', status: 'done', detail: 'T2 required' }, { name: 'swap.quote(12 USDC → ETH)', status: 'done', detail: '1 ETH = $2,490.11' }], cards: [{ kind: 'swap', from: 'USDC', to: 'ETH', amount: '12', rate: '1 ETH = $2,490.11', status: 'proposed' } as SwapCard, { kind: 'approval', description: 'Swap 12 USDC → ETH on Uniswap v3 · Sepolia', amount: '$12.00', expires: 'in 4 min' } as ApprovalCard], ts: new Date(Date.now() - 18000) },
-]
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
 
 async function getAgentResponse(userText: string, untrusted?: string[]): Promise<Message> {
-  const lower = userText.toLowerCase()
   const id = crypto.randomUUID()
   try {
     const payload: { goal: string; untrusted?: string[] } = { goal: userText }
@@ -362,95 +400,85 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
       error?: string
       code?: string
       intent?: any
+      data?: any
+      approvalId?: string
     } | null
 
     if (data) {
-      // Handle typed planner failure codes
-      if (data.status === 'blocked' && data.code) {
-        const codeMessages: Record<string, string> = {
-          UNTRUSTED_CONTENT_FLAGGED: 'The attached document was flagged as potentially malicious and blocked. No transaction was executed.',
-          QUARANTINE_FAILED: 'Security quarantine check could not complete. Please try again.',
-          INPUT_INVALID: 'Your goal text is invalid — it may be empty, too long, or contain unsupported characters.',
-          MODEL_REFUSED: 'The AI planner refused this request. The action may be unsupported or out of scope.',
-          INVALID_OUTPUT: 'The AI planner returned a malformed response. Please try rephrasing your goal.',
-          UNGROUNDED_RECIPIENT: 'The recipient address could not be verified from your input.',
-          UNKNOWN_CONTACT: 'The named contact was not found in your address book.',
-          PROVIDERS_UNAVAILABLE: 'AI providers are temporarily unreachable. Please try again in a moment.',
-          BUDGET_EXCEEDED: 'Token or quota limit for this planning session was exceeded.',
-        }
+      if (data.status === 'success' && data.data) {
         return {
-          id,
-          role: 'agent',
-          text: `⚠ ${codeMessages[data.code] || data.error || 'Blocked, nothing executed.'}`,
-          toolCalls: [{ name: 'quarantine.inspect(attachment)', status: 'failed' as const, detail: data.code }],
-          cards: [{
-            kind: 'transaction',
-            status: 'blocked',
-            type: 'Quarantine Blocked',
-            amount: '',
-            to: 'Quarantine Firewall',
-            reason: data.error || codeMessages[data.code] || 'Untrusted content flagged',
-          } as TransactionCard],
+          id, role: 'agent',
+          text: "Here's your current guarded wallet balance:",
+          toolCalls: [{ name: 'wallet.getBalance()', status: 'done' as const, detail: `${data.data.balanceEth} ETH, ${data.data.balanceUsdc} USDC` }],
+          cards: [{ kind: 'balance', eth: `${data.data.balanceEth} ETH`, usdc: `${data.data.balanceUsdc} USDC`, total: `${data.data.balanceEth} ETH`, change: '+0.00%' } as BalanceCard],
+          ts: new Date(),
+        }
+      }
+
+      if (data.status === 'approval_required') {
+        return {
+          id, role: 'agent',
+          text: `This transaction requires your manual approval (T2).`,
+          toolCalls: [{ name: 'policy.validate(intent)', status: 'done' as const, detail: 'T2 required' }],
+          cards: [{ 
+            kind: 'approval', 
+            description: `Transaction to ${data.intent?.recipient || 'recipient'}`, 
+            amount: `${data.intent?.amount} ${data.intent?.token}`, 
+            expires: 'in 5 min',
+            approvalId: data.approvalId
+          } as ApprovalCard],
+          ts: new Date(),
+        }
+      }
+
+      if (data.status === 'blocked' && data.code) {
+        return {
+          id, role: 'agent',
+          text: `⚠ Blocked: ${data.error || 'The action violates security policy.'}`,
+          toolCalls: [{ name: 'quarantine.inspect()', status: 'failed' as const, detail: data.code }],
+          cards: [{ kind: 'transaction', status: 'blocked', type: 'Quarantine Blocked', amount: '', to: 'Security Firewall', reason: data.error || 'Untrusted content flagged' } as TransactionCard],
           ts: new Date(),
         }
       }
 
       if (data.status === 'denied') {
         return {
-          id,
-          role: 'agent',
+          id, role: 'agent',
           text: `⚠ Policy denied: ${data.reason || 'Transaction violates wallet security policy.'}`,
           toolCalls: [{ name: 'policy.evaluate(intent)', status: 'failed' as const, detail: 'Policy Denied' }],
-          cards: [{
-            kind: 'transaction',
-            status: 'blocked',
-            type: data.intent?.action ? `${data.intent.action.toUpperCase()} ${data.intent.amount ?? ''} ${data.intent.token ?? ''}`.trim() : 'Policy Denied',
-            amount: data.intent?.amount ? `${data.intent.amount} ${data.intent.token}` : '',
-            to: data.intent?.recipient || 'External',
-            reason: data.reason || 'Denied by policy guardrails',
-          } as TransactionCard],
+          cards: [{ kind: 'transaction', status: 'blocked', type: data.intent?.action ? `${data.intent.action.toUpperCase()} ${data.intent.amount ?? ''}`.trim() : 'Policy Denied', amount: data.intent?.amount ? `${data.intent.amount} ${data.intent.token}` : '', to: data.intent?.recipient || 'External', reason: data.reason || 'Denied by policy guardrails' } as TransactionCard],
           ts: new Date(),
         }
       }
 
-      if (data.status === 'not_executed') {
+      if (data.txHash || data.status === 'confirmed' || data.status === 'success') {
         return {
-          id,
-          role: 'agent',
-          text: `⚠ ${data.error || 'Transaction could not be executed.'}`,
-          toolCalls: [{ name: 'signer.broadcast()', status: 'failed' as const, detail: data.error || 'Execution halted' }],
-          ts: new Date(),
-        }
-      }
-
-      if (data.txHash || data.status === 'confirmed') {
-        return {
-          id,
-          role: 'agent',
-          text: `Transaction confirmed on-chain! Hash: ${data.txHash || 'confirmed'}`,
+          id, role: 'agent',
+          text: `Transaction confirmed on-chain!`,
           toolCalls: [
-            { name: 'policy.validate()', status: 'done', detail: 'Approved' },
-            { name: 'signer.broadcast()', status: 'done', detail: 'Confirmed' },
+            { name: 'policy.validate()', status: 'done' as const, detail: 'Approved' },
+            { name: 'signer.broadcast()', status: 'done' as const, detail: 'Confirmed' },
           ],
-          cards: [{
-            kind: 'transaction',
-            status: 'confirmed',
-            type: data.intent?.action ? `${data.intent.action} ${data.intent.amount || ''} ${data.intent.token || ''}`.trim() : 'Execution confirmed',
-            amount: data.intent?.amount ? `${data.intent.amount} ${data.intent.token}` : '',
-            to: data.intent?.recipient || 'Recipient',
-            hash: data.txHash,
-          } as TransactionCard],
+          cards: [{ kind: 'transaction', status: 'confirmed', type: data.intent?.action ? `${data.intent.action} ${data.intent.amount || ''} ${data.intent.token || ''}`.trim() : 'Execution confirmed', amount: data.intent?.amount ? `${data.intent.amount} ${data.intent.token}` : '', to: data.intent?.recipient || 'Recipient', hash: data.txHash } as TransactionCard],
           ts: new Date(),
         }
       }
     }
-  } catch { /* fall through */ }
-  await new Promise(r => setTimeout(r, 1000 + Math.random() * 800))
-  if (lower.includes('balance') || lower.includes('wallet')) return { id, role: 'agent', text: "Here's your current guarded wallet balance:", toolCalls: [{ name: 'wallet.getBalance()', status: 'done', detail: '0.72 ETH, 1079.43 USDC' }], cards: [{ kind: 'balance', eth: '0.72 ETH', usdc: '$1,079.43', total: '$2,840.60', change: '+2.4%' } as BalanceCard], ts: new Date() }
-  if (lower.includes('swap') || lower.includes('usdc')) { const amt = userText.match(/\d+\.?\d*/)?.[0] ?? '20'; return { id, role: 'agent', text: `Swap of ${amt} USDC requires T2 approval:`, toolCalls: [{ name: 'policy.validate(swap)', status: 'done', detail: 'T2 required' }, { name: `swap.quote(${amt} USDC → ETH)`, status: 'done', detail: '1 ETH = $2,490.11' }], cards: [{ kind: 'swap', from: 'USDC', to: 'ETH', amount: amt, rate: '1 ETH = $2,490.11', status: 'proposed' } as SwapCard, { kind: 'approval', description: `Swap ${amt} USDC → ETH on Uniswap v3`, amount: `$${amt}.00`, expires: 'in 5 min' } as ApprovalCard], ts: new Date() } }
-  if (lower.includes('send') || lower.includes('transfer')) { const amt = userText.match(/\d+\.?\d*/)?.[0] ?? '0.01'; const blocked = parseFloat(amt) > 0.5; return { id, role: 'agent', text: blocked ? `⚠ Transfer blocked — exceeds per-tx cap ($25.00).` : `Transfer validated and signed successfully.`, toolCalls: [{ name: 'policy.validate(transfer)', status: blocked ? 'failed' : 'done', detail: blocked ? 'Exceeds per-tx cap' : 'All checks passed' }, ...(!blocked ? [{ name: 'signer.sign(tx)', status: 'done' as const, detail: 'Confirmed' }] : [])], cards: [{ kind: 'transaction', status: blocked ? 'blocked' : 'confirmed', type: `Transfer ${amt} ETH`, amount: `${amt} ETH`, to: '0x3C44…93BC', hash: blocked ? undefined : '0x7a3b…f291', reason: blocked ? 'Exceeds per-transaction cap ($25.00)' : undefined } as TransactionCard], ts: new Date() } }
-  if (lower.includes('policy') || lower.includes('limit')) return { id, role: 'agent', text: "Your active deterministic policy limits:", toolCalls: [{ name: 'policy.getLimits()', status: 'done', detail: 'perTx: $25, daily: $150' }], cards: [{ kind: 'policy', perTxCap: '$25.00', dailyCap: '$150.00', usedToday: '$65.40', autonomyLevel: 'L2 · Standard' } as PolicyCard], ts: new Date() }
-  return { id, role: 'agent', text: `I understand: "${userText}". Analyzing against policy limits… (Demo mode — backend not reachable)`, toolCalls: [{ name: 'policy.validate(goal)', status: 'done', detail: 'Checks passed' }], ts: new Date() }
+  } catch (err) {
+    return {
+      id, role: 'agent',
+      text: `⚠ Backend unreachable or request timed out. Please check your server.`,
+      toolCalls: [{ name: 'network.request()', status: 'failed' as const, detail: 'Connection failed' }],
+      ts: new Date(),
+    }
+  }
+  
+  return {
+    id, role: 'agent',
+    text: `I couldn't process that request.`,
+    toolCalls: [{ name: 'agent.process()', status: 'failed' as const, detail: 'Unknown response' }],
+    ts: new Date(),
+  }
 }
 
 const quickPrompts = ['Check my balance', 'Swap 20 USDC to ETH', 'Send 0.01 ETH to 0xe2463837df0a08d3d1728a0cef444a57a879b1dd', 'Show policy limits']
@@ -467,22 +495,40 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
       if (saved) return JSON.parse(saved)
     } catch {}
     return {
-      name: 'Mayes',
-      handle: 'owner@bambooleaf.eth',
-      email: 'mayes@bambooleaf.eth',
-      walletAddress: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
-      role: 'Primary Signer · Workspace Owner',
-      avatarColor: 'from-[#65A30D] to-[#84CC16]',
-      bio: 'Guarded agent workspace administrator on Sepolia testnet.',
-      telegram: '@mayes_guard',
-      cardName: 'MAYES · OWNER',
+      name: 'Mayes', handle: 'owner@bambooleaf.eth', email: 'mayes@bambooleaf.eth', walletAddress: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+      role: 'Primary Signer · Workspace Owner', avatarColor: 'from-[#65A30D] to-[#84CC16]', bio: '...', telegram: '@mayes_guard', cardName: 'MAYES · OWNER',
     }
   })
 
   useEffect(() => {
     if (propProfile) setUserProfile(propProfile)
   }, [propProfile])
-  const [messages, setMessages] = useState<Message[]>(demoMessages)
+
+  // UPDATED: Save chat to localStorage
+  const [messages, setMessages] = useState<Message[]>(() => {
+    try {
+      const saved = localStorage.getItem('bambooleaf_chat_history')
+      if (saved) {
+        return JSON.parse(saved, (key, value) => {
+          if (key === 'ts') return new Date(value)
+          return value
+        })
+      }
+    } catch (err) {
+      console.error('Failed to load chat history', err)
+    }
+    return [{ id: '0', role: 'system', text: 'BambooLeaf Agent connected · Sepolia testnet · Policy active', ts: new Date() }]
+  })
+
+  // UPDATED: Save messages when they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('bambooleaf_chat_history', JSON.stringify(messages))
+    } catch (err) {
+      console.error('Failed to save chat history', err)
+    }
+  }, [messages])
+
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const [showAttachment, setShowAttachment] = useState(false)
@@ -494,16 +540,13 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isTyping])
 
-  // Right panel resize handler
   const handleContextResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     contextResizing.current = true
     const startX = e.clientX
     const startWidth = contextPanelWidth
-
     const onMove = (ev: MouseEvent) => {
       if (!contextResizing.current) return
-      // Dragging left makes the panel wider
       const delta = startX - ev.clientX
       const newWidth = Math.max(200, Math.min(450, startWidth + delta))
       setContextPanelWidth(newWidth)

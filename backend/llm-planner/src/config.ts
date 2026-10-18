@@ -1,6 +1,8 @@
 // Config parsing. Everything comes from environment variables; nothing is hardcoded.
 // Bad config throws ConfigError at startup (fail closed).
 
+import { getAddress, isAddress } from 'ethers'
+
 export class ConfigError extends Error {}
 
 export interface ProviderConfig {
@@ -10,6 +12,8 @@ export interface ProviderConfig {
   extraBody: Record<string, unknown>
   jsonMode: boolean
 }
+
+export type Network = 'local' | 'sepolia'
 
 export interface ChainEntry {
   provider: string
@@ -21,8 +25,13 @@ export interface PlannerConfig {
   plannerChain: ChainEntry[]
   quarantineChain: ChainEntry[]
   tokens: string[]
+  network: Network
+  chainIds: Record<Network, number>
+  /** Chain id of the selected network; stamped on every intent by trusted code. */
   chainId: number
   defaultSlippageBps: number
+  /** Saved contacts (name -> checksummed address). Only the NAMES are ever sent to a model. */
+  addressBook: Record<string, string>
   timeoutMs: number
   maxOutputTokens: number
   totalTokenBudget: number
@@ -75,6 +84,39 @@ export function parseChain(raw: string | undefined, label: string, providers: Re
   })
 }
 
+const CONTACT_NAME = /^[\p{L}\p{N} ._-]{1,50}$/u
+const MAX_CONTACTS = 50
+
+/** PLANNER_ADDRESS_BOOK: JSON object of contact name -> public address. Checksum is enforced; anything wrong fails startup. */
+export function parseAddressBook(raw: string | undefined): Record<string, string> {
+  if (raw === undefined || raw.trim() === '') return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new ConfigError('PLANNER_ADDRESS_BOOK must be a JSON object of contact name to address')
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ConfigError('PLANNER_ADDRESS_BOOK must be a JSON object of contact name to address')
+  }
+  const entries = Object.entries(parsed as Record<string, unknown>)
+  if (entries.length > MAX_CONTACTS) throw new ConfigError(`PLANNER_ADDRESS_BOOK has more than ${MAX_CONTACTS} contacts`)
+  const book: Record<string, string> = {}
+  const seen = new Set<string>()
+  for (const [name, value] of entries) {
+    if (!CONTACT_NAME.test(name) || name.trim() !== name) {
+      throw new ConfigError('PLANNER_ADDRESS_BOOK has an invalid contact name (1-50 letters, digits, space, dot, dash or underscore; no leading or trailing space)')
+    }
+    if (seen.has(name.toLowerCase())) throw new ConfigError(`PLANNER_ADDRESS_BOOK lists "${name}" twice (names are case-insensitive)`)
+    seen.add(name.toLowerCase())
+    if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value) || !isAddress(value) || /^0x0{40}$/.test(value)) {
+      throw new ConfigError(`PLANNER_ADDRESS_BOOK entry "${name}" must be a valid, checksum-correct, non-zero address`)
+    }
+    book[name] = getAddress(value)
+  }
+  return book
+}
+
 export interface LoadOptions {
   /** Mock/offline modes do not need API keys. */
   requireKeys?: boolean
@@ -83,7 +125,7 @@ export interface LoadOptions {
 export function loadConfig(env: Env, options: LoadOptions = {}): PlannerConfig {
   const requireKeys = options.requireKeys ?? true
   const names = (env.PROVIDERS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-  if (names.length === 0) throw new ConfigError('PROVIDERS is required (for example alibaba,siliconflow)')
+  if (names.length === 0) throw new ConfigError('PROVIDERS is required (for example groq)')
 
   const providers: Record<string, ProviderConfig> = {}
   for (const name of names) {
@@ -126,13 +168,23 @@ export function loadConfig(env: Env, options: LoadOptions = {}): PlannerConfig {
     throw new ConfigError('PLANNER_TOKENS must be a list of symbols like ETH,USDC')
   }
 
+  const network = (env.PLANNER_NETWORK ?? 'local').trim().toLowerCase()
+  if (network !== 'local' && network !== 'sepolia') throw new ConfigError('PLANNER_NETWORK must be local or sepolia')
+  const chainIds: Record<Network, number> = {
+    local: parseInt10(env.LOCAL_CHAIN_ID, 31337, 'LOCAL_CHAIN_ID', 1, 2 ** 31),
+    sepolia: parseInt10(env.SEPOLIA_CHAIN_ID, 11155111, 'SEPOLIA_CHAIN_ID', 1, 2 ** 31),
+  }
+
   return {
     providers,
     plannerChain,
     quarantineChain,
     tokens: [...new Set(tokens)],
-    chainId: parseInt10(env.PLANNER_CHAIN_ID, 11155111, 'PLANNER_CHAIN_ID', 1, 2 ** 31),
+    network,
+    chainIds,
+    chainId: chainIds[network],
     defaultSlippageBps: parseInt10(env.PLANNER_DEFAULT_SLIPPAGE_BPS, 50, 'PLANNER_DEFAULT_SLIPPAGE_BPS', 1, 10000),
+    addressBook: parseAddressBook(env.PLANNER_ADDRESS_BOOK),
     timeoutMs: parseInt10(env.LLM_TIMEOUT_MS, 20000, 'LLM_TIMEOUT_MS', 100, 300000),
     maxOutputTokens: parseInt10(env.LLM_MAX_OUTPUT_TOKENS, 600, 'LLM_MAX_OUTPUT_TOKENS', 16, 8192),
     totalTokenBudget: parseInt10(env.LLM_TOTAL_TOKEN_BUDGET, 200000, 'LLM_TOTAL_TOKEN_BUDGET', 1, 100_000_000),
