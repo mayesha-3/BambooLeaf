@@ -3,7 +3,8 @@ import Icon from '../components/ui/Icon'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import GoalComposer from '../components/GoalComposer'
-import type { AuditState, Page, IconName } from '../types'
+import LiveRatesConverterCard from '../features/market/LiveRatesConverterCard'
+import type { AuditState, Page, IconName, UserProfile } from '../types'
 
 const demoActivity = [
   { title: 'Daily allocation check', detail: 'Read-only · ETH / USDC', time: '2 min ago', status: 'Completed', tone: 'green', icon: 'activity' as IconName },
@@ -16,11 +17,14 @@ export default function OverviewPage({
   onNavigate,
   auditState,
   onOpenGoalModal,
+  userProfile,
 }: {
   onNavigate: (page: Page) => void
   auditState: AuditState
   onOpenGoalModal: (prompt?: string) => void
+  userProfile?: UserProfile
 }) {
+  const displayCardName = userProfile?.cardName || (userProfile?.name ? `${userProfile.name.toUpperCase()} · OWNER` : 'MAYES · OWNER')
   const [chartPeriod, setChartPeriod] = useState<'7d' | '30d' | '90d'>('7d')
   const [chartType, setChartType] = useState<'bar' | 'line'>('bar')
   const [selectedDayIndex, setSelectedDayIndex] = useState<number>(3) // Wednesday selected by default
@@ -61,16 +65,16 @@ export default function OverviewPage({
         <div className="xl:col-span-8 space-y-6">
           {/* 4. ASK BAMBOOLAF (Goal Composer) CARD */}
           <Card className="overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-6 border-b border-slate-100 pb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-6 border-b border-slate-100 dark:border-slate-800/80 pb-4">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-2xl bg-lime-50 text-[#65A30D] flex items-center justify-center">
+                <div className="w-9 h-9 rounded-2xl bg-lime-50 dark:bg-lime-950/50 text-[#65A30D] dark:text-lime-400 flex items-center justify-center">
                   <Icon name="spark" size={18} />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
                     Ask BambooLeaf
                   </h3>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-400 dark:text-slate-400">
                     Describe a goal. Guardrails always validate
                     deterministically.
                   </p>
@@ -78,7 +82,7 @@ export default function OverviewPage({
               </div>
               <button
                 onClick={() => onNavigate("policy")}
-                className="text-xs font-bold text-slate-500 hover:text-[#65A30D] flex items-center gap-1">
+                className="text-xs font-bold text-slate-500 hover:text-[#65A30D] dark:text-slate-400 dark:hover:text-lime-400 flex items-center gap-1">
                 Policy rules apply <Icon name="chevron" size={13} />
               </button>
             </div>
@@ -92,7 +96,7 @@ export default function OverviewPage({
               <div className="lg:col-span-8 space-y-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+                    <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white tracking-tight">
                       $2,840.60
                     </h2>
                     <p className="text-xs font-semibold text-slate-400 mt-1">
@@ -109,7 +113,7 @@ export default function OverviewPage({
                         onChange={(e) =>
                           setChartPeriod(e.target.value as "7d" | "30d" | "90d")
                         }
-                        className="appearance-none bg-white border border-slate-200 rounded-xl px-3.5 py-1.5 pr-7 text-xs font-bold text-slate-700 hover:border-slate-300 focus:outline-none cursor-pointer shadow-sm">
+                        className="appearance-none bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-1.5 pr-7 text-xs font-bold text-slate-700 dark:text-slate-200 hover:border-slate-300 dark:hover:border-slate-600 focus:outline-none cursor-pointer shadow-sm">
                         <option value="7d">7d</option>
                         <option value="30d">30d</option>
                         <option value="90d">90d</option>
@@ -128,10 +132,10 @@ export default function OverviewPage({
                       </svg>
                     </div>
 
-                    <div className="flex items-center bg-slate-100 p-1 rounded-xl">
+                    <div className="flex items-center bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl">
                       <button
                         onClick={() => setChartType("bar")}
-                        className={`p-1.5 rounded-lg transition ${chartType === "bar" ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-700"}`}
+                        className={`p-1.5 rounded-lg transition ${chartType === "bar" ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm" : "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"}`}
                         title="Bar view">
                         <svg
                           className="w-4 h-4"
@@ -146,7 +150,7 @@ export default function OverviewPage({
                       </button>
                       <button
                         onClick={() => setChartType("line")}
-                        className={`p-1.5 rounded-lg transition ${chartType === "line" ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-700"}`}
+                        className={`p-1.5 rounded-lg transition ${chartType === "line" ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm" : "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"}`}
                         title="Line view">
                         <svg
                           className="w-4 h-4"
@@ -166,7 +170,7 @@ export default function OverviewPage({
                 </div>
 
                 {/* Legend */}
-                <div className="flex items-center justify-end gap-4 text-xs font-semibold text-slate-500 pt-1">
+                <div className="flex items-center justify-end gap-4 text-xs font-semibold text-slate-500 dark:text-slate-400 pt-1">
                   <span className="flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-[#EAB308]" />{" "}
                     Savings (USDC)
@@ -192,11 +196,11 @@ export default function OverviewPage({
                   </div>
 
                   <div className="ml-7 flex flex-col justify-between h-44 absolute inset-x-0 top-7 pointer-events-none">
-                    <div className="border-b border-slate-100 w-full" />
-                    <div className="border-b border-slate-100 w-full" />
-                    <div className="border-b border-slate-100 w-full" />
-                    <div className="border-b border-slate-200/80 w-full" />
-                    <div className="border-b border-slate-100 w-full" />
+                    <div className="border-b border-slate-100 dark:border-slate-800/60 w-full" />
+                    <div className="border-b border-slate-100 dark:border-slate-800/60 w-full" />
+                    <div className="border-b border-slate-100 dark:border-slate-800/60 w-full" />
+                    <div className="border-b border-slate-200/80 dark:border-slate-700/60 w-full" />
+                    <div className="border-b border-slate-100 dark:border-slate-800/60 w-full" />
                   </div>
 
                   {chartType === "bar" ? (
@@ -209,45 +213,45 @@ export default function OverviewPage({
                             onClick={() => setSelectedDayIndex(index)}
                             className="relative flex flex-col items-center group cursor-pointer h-full justify-end">
                             {isSelected && (
-                              <div className="absolute -top-16 sm:-top-20 z-20 bg-white/95 backdrop-blur-md rounded-2xl p-3 border border-slate-100 shadow-[0_12px_30px_rgba(0,0,0,0.12)] min-w-[150px] animate-in fade-in zoom-in-95">
+                              <div className="absolute -top-16 sm:-top-20 z-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl p-3 border border-slate-100 dark:border-slate-800 shadow-[0_12px_30px_rgba(0,0,0,0.12)] dark:shadow-[0_12px_30px_rgba(0,0,0,0.5)] min-w-[150px] animate-in fade-in zoom-in-95">
                                 <p className="text-[10px] font-bold text-slate-400 mb-1.5">
                                   {item.date}
                                 </p>
                                 <div className="space-y-1 text-[11px] font-bold">
                                   <div className="flex items-center justify-between">
-                                    <span className="flex items-center gap-1.5 text-slate-600 font-medium">
+                                    <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-medium">
                                       <span className="w-1.5 h-1.5 rounded-full bg-[#EAB308]" />{" "}
                                       Savings
                                     </span>
-                                    <span className="text-slate-900">
+                                    <span className="text-slate-900 dark:text-white">
                                       ${item.savings}
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between">
-                                    <span className="flex items-center gap-1.5 text-slate-600 font-medium">
+                                    <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-medium">
                                       <span className="w-1.5 h-1.5 rounded-full bg-[#84CC16]" />{" "}
                                       Inflow
                                     </span>
-                                    <span className="text-slate-900">
+                                    <span className="text-slate-900 dark:text-white">
                                       ${item.income}
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between">
-                                    <span className="flex items-center gap-1.5 text-slate-600 font-medium">
+                                    <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-medium">
                                       <span className="w-1.5 h-1.5 rounded-full bg-[#FB923C]" />{" "}
                                       Outflow
                                     </span>
-                                    <span className="text-slate-900">
+                                    <span className="text-slate-900 dark:text-white">
                                       ${item.expenses}
                                     </span>
                                   </div>
                                 </div>
-                                <div className="absolute left-1/2 -bottom-1.5 -translate-x-1/2 w-3 h-3 bg-white rotate-45 border-r border-b border-slate-100" />
+                                <div className="absolute left-1/2 -bottom-1.5 -translate-x-1/2 w-3 h-3 bg-white dark:bg-slate-900 rotate-45 border-r border-b border-slate-100 dark:border-slate-800" />
                               </div>
                             )}
 
                             <div className="w-7 sm:w-9 flex flex-col justify-end items-center relative h-full">
-                              <div className="w-full h-full bg-[#F3F5F7] rounded-full absolute inset-0 transition group-hover:bg-[#EAEFF4]" />
+                              <div className="w-full h-full bg-[#F3F5F7] dark:bg-slate-800/70 rounded-full absolute inset-0 transition group-hover:bg-[#EAEFF4] dark:group-hover:bg-slate-700/60" />
                               {isSelected ? (
                                 <div
                                   className="w-full z-10 flex flex-col rounded-2xl overflow-hidden shadow-sm"
@@ -265,7 +269,7 @@ export default function OverviewPage({
                             </div>
 
                             <span
-                              className={`mt-3 text-[11px] font-bold transition ${isSelected ? "text-slate-900" : "text-slate-400 group-hover:text-slate-600"}`}>
+                              className={`mt-3 text-[11px] font-bold transition ${isSelected ? "text-slate-900 dark:text-white" : "text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300"}`}>
                               {item.day}
                             </span>
                           </div>
@@ -328,15 +332,15 @@ export default function OverviewPage({
               </div>
 
               {/* Right Side Stats Column (Our 3 key metrics styled in Shakuro's layout) */}
-              <div className="lg:col-span-4 flex flex-col justify-between lg:border-l lg:border-slate-100 lg:pl-7 pt-4 lg:pt-0 space-y-6">
+              <div className="lg:col-span-4 flex flex-col justify-between lg:border-l lg:border-slate-100 dark:lg:border-slate-800/80 lg:pl-7 pt-4 lg:pt-0 space-y-6">
                 <div>
                   <p className="text-xs font-bold text-slate-400">
                     Actions this week
                   </p>
-                  <p className="text-3xl font-extrabold text-slate-900 tracking-tight mt-1">
+                  <p className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight mt-1">
                     24
                   </p>
-                  <p className="text-xs font-bold text-[#65A30D] flex items-center gap-1 mt-1.5">
+                  <p className="text-xs font-bold text-[#65A30D] dark:text-lime-400 flex items-center gap-1 mt-1.5">
                     <svg
                       className="w-3.5 h-3.5"
                       viewBox="0 0 24 24"
@@ -360,10 +364,10 @@ export default function OverviewPage({
                   <p className="text-xs font-bold text-slate-400">
                     Awaiting approval
                   </p>
-                  <p className="text-3xl font-extrabold text-slate-900 tracking-tight mt-1">
+                  <p className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight mt-1">
                     2
                   </p>
-                  <p className="text-xs font-bold text-amber-600 flex items-center gap-1 mt-1.5">
+                  <p className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1.5">
                     <Icon name="clock" size={13} />
                     One expires in 4 min
                   </p>
@@ -373,10 +377,10 @@ export default function OverviewPage({
                   <p className="text-xs font-bold text-slate-400">
                     Blocked by guard
                   </p>
-                  <p className="text-3xl font-extrabold text-slate-900 tracking-tight mt-1">
+                  <p className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight mt-1">
                     3
                   </p>
-                  <p className="text-xs font-bold text-[#65A30D] flex items-center gap-1 mt-1.5">
+                  <p className="text-xs font-bold text-[#65A30D] dark:text-lime-400 flex items-center gap-1 mt-1.5">
                     <Icon name="shield" size={13} />
                     All caught before signing
                   </p>
@@ -392,7 +396,7 @@ export default function OverviewPage({
               <div>
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="text-base font-bold text-slate-900">
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
                       Daily spending limit
                     </h3>
                     <p className="text-xs text-slate-400 mt-0.5">
@@ -401,22 +405,22 @@ export default function OverviewPage({
                   </div>
                   <button
                     onClick={() => onNavigate("policy")}
-                    className="text-slate-400 hover:text-slate-700 p-1 rounded-lg transition"
+                    className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-1 rounded-lg transition"
                     title="Edit policy limit">
                     <Icon name="edit" size={16} />
                   </button>
                 </div>
 
                 <div className="mt-8">
-                  <div className="w-full bg-[#F3F5F7] h-5 rounded-full overflow-hidden p-1 flex items-center">
+                  <div className="w-full bg-[#F3F5F7] dark:bg-slate-800/80 h-5 rounded-full overflow-hidden p-1 flex items-center">
                     <div
                       className="bg-[#84CC16] h-full rounded-full transition-all duration-500 shadow-sm"
                       style={{ width: "43.6%" }}
                     />
                   </div>
-                  <div className="flex justify-between items-center text-xs font-bold text-slate-500 mt-3">
-                    <span className="text-slate-800">$65.40 used</span>
-                    <span className="text-slate-400">$150.00 cap</span>
+                  <div className="flex justify-between items-center text-xs font-bold text-slate-500 dark:text-slate-400 mt-3">
+                    <span className="text-slate-800 dark:text-slate-200">$65.40 used</span>
+                    <span className="text-slate-400 dark:text-slate-500">$150.00 cap</span>
                   </div>
                 </div>
               </div>
@@ -426,7 +430,7 @@ export default function OverviewPage({
             <Card className="p-6 flex items-center justify-between gap-4">
               <div className="space-y-3 max-w-[240px]">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-base font-bold text-slate-900">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
                     Earned autonomy
                   </h3>
                   <Badge tone="green">L2 · Standard</Badge>
@@ -437,14 +441,14 @@ export default function OverviewPage({
                 </p>
                 <button
                   onClick={() => onNavigate("autonomy")}
-                  className="inline-flex items-center gap-1 text-xs font-bold text-slate-900 hover:underline pt-1">
+                  className="inline-flex items-center gap-1 text-xs font-bold text-slate-900 dark:text-white hover:underline pt-1">
                   View autonomy details
                   <Icon name="arrow" size={13} />
                 </button>
               </div>
 
               {/* Decorative Geometric Mosaic Pattern from Shakuro design */}
-              <div className="grid grid-cols-3 gap-1.5 shrink-0 w-24 h-24 p-2 bg-slate-50/50 rounded-2xl">
+              <div className="grid grid-cols-3 gap-1.5 shrink-0 w-24 h-24 p-2 bg-slate-50/50 dark:bg-slate-800/40 rounded-2xl">
                 <div className="rounded-lg bg-lime-100/60" />
                 <div className="rounded-lg bg-[#A3E635]" />
                 <div className="rounded-lg bg-lime-200" />
@@ -465,7 +469,7 @@ export default function OverviewPage({
               <div>
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="text-base font-bold text-slate-900">
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
                       Portfolio allocation
                     </h3>
                     <p className="text-xs text-slate-400 mt-0.5">
@@ -474,43 +478,43 @@ export default function OverviewPage({
                   </div>
                   <button
                     onClick={() => onNavigate("wallet")}
-                    className="text-xs font-bold text-[#65A30D] hover:underline">
+                    className="text-xs font-bold text-[#65A30D] dark:text-lime-400 hover:underline">
                     Wallet →
                   </button>
                 </div>
 
-                <p className="text-2xl font-extrabold text-slate-900 mt-4">
+                <p className="text-2xl font-extrabold text-slate-900 dark:text-white mt-4">
                   $2,840.60
                 </p>
 
                 {/* Progress bar */}
-                <div className="mt-4 flex h-3 w-full rounded-full overflow-hidden bg-slate-100 gap-0.5">
+                <div className="mt-4 flex h-3 w-full rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 gap-0.5">
                   <span className="bg-[#84CC16] w-[62%]" title="ETH: 62%" />
                   <span className="bg-[#0284C7] w-[38%]" title="USDC: 38%" />
                 </div>
 
                 <div className="mt-5 space-y-2.5 text-xs">
                   <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-2 text-slate-600 font-semibold">
+                    <span className="flex items-center gap-2 text-slate-600 dark:text-slate-400 font-semibold">
                       <span className="w-2.5 h-2.5 rounded-full bg-[#84CC16]" />{" "}
                       Sepolia ETH
                     </span>
-                    <span className="font-bold text-slate-900">
+                    <span className="font-bold text-slate-900 dark:text-white">
                       62% · $1,761.17
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-2 text-slate-600 font-semibold">
+                    <span className="flex items-center gap-2 text-slate-600 dark:text-slate-400 font-semibold">
                       <span className="w-2.5 h-2.5 rounded-full bg-[#0284C7]" />{" "}
                       USD Coin (USDC)
                     </span>
-                    <span className="font-bold text-slate-900">
+                    <span className="font-bold text-slate-900 dark:text-white">
                       38% · $1,079.43
                     </span>
                   </div>
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-slate-400">
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-slate-400">
                     <span>Target Drift</span>
-                    <span className="font-bold text-amber-600">+2.4%</span>
+                    <span className="font-bold text-amber-600 dark:text-amber-400">+2.4%</span>
                   </div>
                 </div>
               </div>
@@ -521,7 +525,7 @@ export default function OverviewPage({
               <div>
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="text-base font-bold text-slate-900">
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
                       Autonomy health
                     </h3>
                     <p className="text-xs text-slate-400 mt-0.5">
@@ -532,10 +536,10 @@ export default function OverviewPage({
                 </div>
 
                 <div className="flex items-baseline gap-2 mt-4">
-                  <p className="text-2xl font-extrabold text-slate-900">
+                  <p className="text-2xl font-extrabold text-slate-900 dark:text-white">
                     7 / 10
                   </p>
-                  <span className="text-[11px] font-bold text-[#65A30D]">
+                  <span className="text-[11px] font-bold text-[#65A30D] dark:text-lime-400">
                     ↗ +2 clean actions
                   </span>
                 </div>
@@ -560,7 +564,7 @@ export default function OverviewPage({
                     <path
                       d="M 15 80 A 65 65 0 0 1 145 80"
                       fill="none"
-                      stroke="#F1F5F9"
+                      className="stroke-slate-100 dark:stroke-slate-800"
                       strokeWidth="16"
                       strokeLinecap="round"
                     />
@@ -573,7 +577,7 @@ export default function OverviewPage({
                     />
                   </svg>
                   <div className="text-center -mt-9">
-                    <p className="text-3xl font-extrabold text-slate-900">
+                    <p className="text-3xl font-extrabold text-slate-900 dark:text-white">
                       70%
                     </p>
                     <p className="text-[11px] font-medium text-slate-400">
@@ -592,12 +596,12 @@ export default function OverviewPage({
             <Card className="p-6 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-slate-900">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
                     Guardrail limits
                   </h3>
                   <button
                     onClick={() => onOpenGoalModal()}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 hover:text-slate-950 border border-slate-200 rounded-full px-2.5 py-1 hover:bg-slate-50 transition">
+                    className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white border border-slate-200 dark:border-slate-700 rounded-full px-2.5 py-1 hover:bg-slate-50 dark:hover:bg-slate-800 transition">
                     + Plan goal
                   </button>
                 </div>
@@ -607,19 +611,19 @@ export default function OverviewPage({
                     Per-Transaction Cap
                   </p>
                   <div className="mt-2.5 flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-lime-50 border border-lime-100 flex items-center justify-center shrink-0 text-lg">
+                    <div className="w-10 h-10 rounded-2xl bg-lime-50 dark:bg-lime-950/50 border border-lime-100 dark:border-lime-900/50 flex items-center justify-center shrink-0 text-lg">
                       🛡️
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-baseline">
-                        <span className="text-xs font-bold text-slate-800">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                           Max per tx
                         </span>
-                        <span className="text-xs font-bold text-slate-700">
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                           $25.00
                         </span>
                       </div>
-                      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-1.5">
+                      <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden mt-1.5">
                         <div
                           className="bg-[#84CC16] h-full rounded-full"
                           style={{ width: "48%" }}
@@ -637,19 +641,19 @@ export default function OverviewPage({
                     Daily Aggregate Cap
                   </p>
                   <div className="mt-2.5 flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-amber-50 border border-amber-100 flex items-center justify-center shrink-0 text-lg">
+                    <div className="w-10 h-10 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-100 dark:border-amber-900/50 flex items-center justify-center shrink-0 text-lg">
                       ⚡
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-baseline">
-                        <span className="text-xs font-bold text-slate-800">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                           Daily total
                         </span>
-                        <span className="text-xs font-bold text-slate-700">
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                           $150.00
                         </span>
                       </div>
-                      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-1.5">
+                      <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden mt-1.5">
                         <div
                           className="bg-[#FB923C] h-full rounded-full"
                           style={{ width: "43.6%" }}
@@ -665,7 +669,8 @@ export default function OverviewPage({
             </Card>
           </div>
 
-         
+          {/* 2. REAL-TIME CURRENCY RATES & CONVERTER WIDGET */}
+          <LiveRatesConverterCard onOpenGoalModal={onOpenGoalModal} />
         </div>
 
         {/* ================= RIGHT COLUMN (4 COLUMNS) ================= */}
@@ -674,7 +679,7 @@ export default function OverviewPage({
           <Card className="p-6 space-y-6">
             <div className="flex items-start justify-between">
               <div>
-                <h3 className="text-base font-bold text-slate-900">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
                   Guarded wallet
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
@@ -683,7 +688,7 @@ export default function OverviewPage({
               </div>
               <button
                 onClick={() => onNavigate("wallet")}
-                className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 hover:text-slate-950 border border-slate-200 rounded-full px-3 py-1 hover:bg-slate-50 transition">
+                className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white border border-slate-200 dark:border-slate-700 rounded-full px-3 py-1 hover:bg-slate-50 dark:hover:bg-slate-800 transition">
                 View wallet
               </button>
             </div>
@@ -802,7 +807,7 @@ export default function OverviewPage({
                           Cardholder
                         </p>
                         <p className="text-xs font-bold tracking-wider text-white uppercase drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]">
-                          Michael Johnson
+                          {displayCardName}
                         </p>
                       </div>
 
@@ -887,7 +892,7 @@ export default function OverviewPage({
                           Cardholder
                         </p>
                         <p className="text-xs font-bold tracking-wider text-slate-100 uppercase">
-                          Michael Johnson
+                          {displayCardName}
                         </p>
                       </div>
                       <div className="text-left">
@@ -912,7 +917,7 @@ export default function OverviewPage({
                   onClick={() =>
                     setActiveCardIndex((prev) => (prev === 0 ? 1 : 0))
                   }
-                  className="w-11 h-44 rounded-2xl p-2 flex flex-col justify-between items-center cursor-pointer transition-all duration-200 hover:scale-[1.03] shadow-md border border-slate-200/80"
+                  className="w-11 h-44 rounded-2xl p-2 flex flex-col justify-between items-center cursor-pointer transition-all duration-200 hover:scale-[1.03] shadow-md border border-slate-200/80 dark:border-slate-700/80"
                   style={{
                     background:
                       activeCardIndex === 0
@@ -933,16 +938,16 @@ export default function OverviewPage({
             </div>
 
             {/* 5 Quick Action Buttons in Shakuro style */}
-            <div className="grid grid-cols-5 gap-2 pt-2 border-t border-slate-100">
+            <div className="grid grid-cols-5 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
               <button
                 onClick={() =>
                   onOpenGoalModal("Send 0.01 ETH to saved recipient")
                 }
                 className="flex flex-col items-center gap-1.5 group">
-                <div className="w-11 h-11 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 group-hover:bg-[#84CC16] group-hover:text-white group-hover:border-[#84CC16] transition shadow-sm">
+                <div className="w-11 h-11 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 flex items-center justify-center text-slate-700 dark:text-slate-300 group-hover:bg-[#84CC16] group-hover:text-white group-hover:border-[#84CC16] transition shadow-sm">
                   <Icon name="send" size={17} />
                 </div>
-                <span className="text-[11px] font-bold text-slate-600 group-hover:text-slate-900">
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white">
                   Send
                 </span>
               </button>
@@ -950,10 +955,10 @@ export default function OverviewPage({
               <button
                 onClick={() => onOpenGoalModal("Swap 12 USDC to ETH")}
                 className="flex flex-col items-center gap-1.5 group">
-                <div className="w-11 h-11 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 group-hover:bg-[#84CC16] group-hover:text-white group-hover:border-[#84CC16] transition shadow-sm">
+                <div className="w-11 h-11 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 flex items-center justify-center text-slate-700 dark:text-slate-300 group-hover:bg-[#84CC16] group-hover:text-white group-hover:border-[#84CC16] transition shadow-sm">
                   <Icon name="refresh" size={17} />
                 </div>
-                <span className="text-[11px] font-bold text-slate-600 group-hover:text-slate-900">
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white">
                   Swap
                 </span>
               </button>
@@ -961,10 +966,10 @@ export default function OverviewPage({
               <button
                 onClick={() => onNavigate("approvals")}
                 className="flex flex-col items-center gap-1.5 group">
-                <div className="w-11 h-11 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 group-hover:bg-[#84CC16] group-hover:text-white group-hover:border-[#84CC16] transition shadow-sm">
+                <div className="w-11 h-11 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 flex items-center justify-center text-slate-700 dark:text-slate-300 group-hover:bg-[#84CC16] group-hover:text-white group-hover:border-[#84CC16] transition shadow-sm">
                   <Icon name="check" size={17} />
                 </div>
-                <span className="text-[11px] font-bold text-slate-600 group-hover:text-slate-900">
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white">
                   Approvals
                 </span>
               </button>
@@ -972,10 +977,10 @@ export default function OverviewPage({
               <button
                 onClick={() => onNavigate("policy")}
                 className="flex flex-col items-center gap-1.5 group">
-                <div className="w-11 h-11 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 group-hover:bg-[#84CC16] group-hover:text-white group-hover:border-[#84CC16] transition shadow-sm">
+                <div className="w-11 h-11 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 flex items-center justify-center text-slate-700 dark:text-slate-300 group-hover:bg-[#84CC16] group-hover:text-white group-hover:border-[#84CC16] transition shadow-sm">
                   <Icon name="shield" size={17} />
                 </div>
-                <span className="text-[11px] font-bold text-slate-600 group-hover:text-slate-900">
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white">
                   Policy
                 </span>
               </button>
@@ -983,24 +988,24 @@ export default function OverviewPage({
               <button
                 onClick={() => onNavigate("autonomy")}
                 className="flex flex-col items-center gap-1.5 group">
-                <div className="w-11 h-11 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 group-hover:bg-[#84CC16] group-hover:text-white group-hover:border-[#84CC16] transition shadow-sm">
+                <div className="w-11 h-11 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 flex items-center justify-center text-slate-700 dark:text-slate-300 group-hover:bg-[#84CC16] group-hover:text-white group-hover:border-[#84CC16] transition shadow-sm">
                   <Icon name="spark" size={17} />
                 </div>
-                <span className="text-[11px] font-bold text-slate-600 group-hover:text-slate-900">
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white">
                   Autonomy
                 </span>
               </button>
             </div>
 
             {/* Quick Payment Section (Exact Shakuro Avatar Circles & Inline Payment Drawer) */}
-            <div className="pt-2 border-t border-slate-100">
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80">
               <div className="flex items-center justify-between mb-3">
-                <h4 className="text-xs font-bold text-slate-800">
+                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
                   Quick payment
                 </h4>
                 <button
                   onClick={() => onOpenGoalModal("Send 0.01 ETH to ")}
-                  className="text-slate-400 hover:text-slate-700 p-1 rounded-lg transition"
+                  className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-1 rounded-lg transition"
                   title="More payment options">
                   <Icon name="more" size={16} />
                 </button>
@@ -1024,7 +1029,7 @@ export default function OverviewPage({
                         loading="lazy"
                       />
                     </div>
-                    <span className="text-[11px] font-bold text-slate-600 group-hover:text-slate-900">
+                    <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white">
                       {contact.name}
                     </span>
                   </button>
@@ -1045,19 +1050,19 @@ export default function OverviewPage({
                       setSelectedRecipient(null);
                     }, 3500);
                   }}
-                  className="mt-3 p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2.5 animate-in fade-in">
+                  className="mt-3 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 space-y-2.5 animate-in fade-in">
                   <div className="flex justify-between items-center text-xs">
-                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-[#84CC16]" />
                       Send to{" "}
-                      <span className="text-[#65A30D]">
+                      <span className="text-[#65A30D] dark:text-lime-400">
                         {selectedRecipient}
                       </span>
                     </span>
                     <button
                       type="button"
                       onClick={() => setSelectedRecipient(null)}
-                      className="text-slate-400 hover:text-slate-700 font-bold">
+                      className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 font-bold">
                       ✕
                     </button>
                   </div>
@@ -1073,7 +1078,7 @@ export default function OverviewPage({
                         placeholder="Amount"
                         value={quickPayAmount}
                         onChange={(e) => setQuickPayAmount(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-xl pl-7 pr-3 py-1.5 text-xs font-bold outline-none focus:ring-2 focus:ring-[#84CC16]"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl pl-7 pr-3 py-1.5 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-[#84CC16]"
                       />
                     </div>
                     <button
@@ -1086,7 +1091,7 @@ export default function OverviewPage({
               )}
 
               {quickPaySuccess && (
-                <div className="mt-2.5 p-2.5 bg-lime-50 text-[#4D7C0F] text-xs rounded-xl font-bold border border-lime-200 animate-in fade-in">
+                <div className="mt-2.5 p-2.5 bg-lime-50 dark:bg-lime-950/40 text-[#4D7C0F] dark:text-lime-300 text-xs rounded-xl font-bold border border-lime-200 dark:border-lime-900/50 animate-in fade-in">
                   ✓ {quickPaySuccess}
                 </div>
               )}
@@ -1096,22 +1101,22 @@ export default function OverviewPage({
           {/* 2. RECENT ACTIVITY & AUDIT CHAIN (Shakuro Transaction History layout) */}
           <Card className="p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
                 Recent activity
               </h3>
               <button
                 onClick={() => onNavigate("activity")}
-                className="text-xs font-bold text-[#65A30D] hover:underline">
+                className="text-xs font-bold text-[#65A30D] dark:text-lime-400 hover:underline">
                 View all →
               </button>
             </div>
 
-            <div className="flex justify-between text-[11px] font-bold text-slate-400 border-b border-slate-100 pb-2">
+            <div className="flex justify-between text-[11px] font-bold text-slate-400 border-b border-slate-100 dark:border-slate-800/80 pb-2">
               <span>Event / Target</span>
               <span>Status</span>
             </div>
 
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
               {auditState.entries.length > 0
                 ? auditState.entries.slice(0, 5).map((entry) => (
                     <div
@@ -1122,8 +1127,8 @@ export default function OverviewPage({
                           className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold ${
                             entry.type.includes("denied") ||
                             entry.type.includes("failed")
-                              ? "bg-rose-50 text-rose-600"
-                              : "bg-lime-50 text-[#65A30D]"
+                              ? "bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400"
+                              : "bg-lime-50 dark:bg-lime-950/50 text-[#65A30D] dark:text-lime-400"
                           }`}>
                           <Icon
                             name={
@@ -1135,7 +1140,7 @@ export default function OverviewPage({
                           />
                         </span>
                         <div>
-                          <p className="text-xs font-bold text-slate-800 capitalize">
+                          <p className="text-xs font-bold text-slate-800 dark:text-slate-200 capitalize">
                             {entry.type.replaceAll(".", " ")}
                           </p>
                           <p className="text-[10px] text-slate-400">
@@ -1168,15 +1173,15 @@ export default function OverviewPage({
                         <span
                           className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold ${
                             item.tone === "red"
-                              ? "bg-rose-50 text-rose-600"
+                              ? "bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400"
                               : item.tone === "amber"
-                                ? "bg-amber-50 text-amber-600"
-                                : "bg-lime-50 text-[#65A30D]"
+                                ? "bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400"
+                                : "bg-lime-50 dark:bg-lime-950/50 text-[#65A30D] dark:text-lime-400"
                           }`}>
                           <Icon name={item.icon} size={15} />
                         </span>
                         <div>
-                          <p className="text-xs font-bold text-slate-800">
+                          <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
                             {item.title}
                           </p>
                           <p className="text-[10px] text-slate-400">

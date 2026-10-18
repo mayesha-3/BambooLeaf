@@ -1,5 +1,6 @@
 import type { ChainEntry, PlannerConfig, ProviderConfig } from './config.ts'
 import { silentLogger, redactString, type Logger } from './logger.ts'
+import { succeeded } from './result.ts'
 
 // OpenAI-compatible chat client + ordered failover chain.
 // This file has no import path to any transaction, signer or wallet code.
@@ -129,7 +130,7 @@ export function createChainChat(deps: ChainDeps): ChatFn {
       const started = Date.now()
       const result = await callProvider(provider, entry.model, messages, deps.config, deps.fetchFn)
       const latencyMs = Date.now() - started
-      if (result.ok) {
+      if (succeeded(result)) {
         deps.budget.add(result.usage.totalTokens)
         logger.info('llm.call', { provider: entry.provider, model: entry.model, latencyMs, ...result.usage, budgetUsed: deps.budget.used })
         return { ok: true, content: result.content, usage: result.usage, provider: entry.provider, model: entry.model, latencyMs }
