@@ -104,3 +104,23 @@ export function reset(): void {
   state.lastDemotionReason = null
   state.frozen = false
 }
+
+export function restoreState(saved: Partial<State>): void {
+  if (saved.level !== 'L0' && saved.level !== 'L1' && saved.level !== 'L2' && saved.level !== 'L3') {
+    throw new Error('Persisted autonomy state has an invalid level')
+  }
+  if (typeof saved.cleanStreak !== 'number' || !Number.isInteger(saved.cleanStreak) || saved.cleanStreak < 0 ||
+      typeof saved.blockedInWindow !== 'number' || !Number.isInteger(saved.blockedInWindow) || saved.blockedInWindow < 0 ||
+      typeof saved.windowStartedAt !== 'number' || !Number.isFinite(saved.windowStartedAt) ||
+      typeof saved.frozen !== 'boolean' ||
+      (saved.lastDemotionReason !== null && typeof saved.lastDemotionReason !== 'string')) {
+    throw new Error('Persisted autonomy state is invalid')
+  }
+  state.level = saved.level
+  state.cleanStreak = saved.cleanStreak
+  state.blockedInWindow = saved.blockedInWindow
+  state.windowStartedAt = saved.windowStartedAt
+  state.lastDemotionReason = saved.lastDemotionReason
+  state.frozen = saved.frozen
+  if (state.frozen) state.level = 'L0'
+}

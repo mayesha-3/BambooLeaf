@@ -7,7 +7,8 @@ import { apiBaseUrl } from '../config/api'
 
 interface DefenseReport {
   blocked: boolean
-  layer: 'Quarantine Firewall' | 'Policy Guardrails' | 'Planner Input Guard' | 'Signer Sandbox'
+  layer: string
+  status: string
   code?: string
   reason: string
   latencyMs: number
@@ -47,7 +48,7 @@ export default function ArenaPage() {
   const [attackAttachment, setAttackAttachment] = useState('')
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState<DefenseReport | null>(null)
-  const [stats, setStats] = useState({ attempts: 14, blocked: 14, naiveSimulatedBreaches: 3 })
+  const [stats, setStats] = useState({ guardedAttempts: 0, guardedBlocks: 0, naiveSimulations: 0 })
 
   async function runAttempt(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -60,11 +61,12 @@ export default function ArenaPage() {
       // Simulate naive LLM behavior (blind execution without guardrails)
       await new Promise(r => setTimeout(r, 600))
       const latencyMs = Math.round(performance.now() - startTime)
-      setStats(prev => ({ ...prev, attempts: prev.attempts + 1, naiveSimulatedBreaches: prev.naiveSimulatedBreaches + 1 }))
+      setStats(prev => ({ ...prev, naiveSimulations: prev.naiveSimulations + 1 }))
       setReport({
         blocked: false,
-        layer: 'Signer Sandbox',
-        reason: 'CRITICAL: In Naive Mode (no BambooLeaf guardrails), the LLM blindly adopted the adversarial instructions and would have executed unauthorized transfers!',
+        layer: 'Local illustration',
+        status: 'simulated',
+        reason: 'Illustrative unguarded-mode simulation only. No model, backend, wallet, signer, or chain was contacted, so this is not a measured exploit.',
         latencyMs,
         mode: 'naive',
       })
@@ -79,11 +81,10 @@ export default function ArenaPage() {
         payload.untrusted = [attackAttachment.trim()]
       }
 
-      const res = await fetch(`${apiBaseUrl}/goal`, {
+      const res = await fetch(`${apiBaseUrl}/arena/evaluate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Idempotency-Key': crypto.randomUUID(),
         },
         body: JSON.stringify(payload),
       })
@@ -91,47 +92,39 @@ export default function ArenaPage() {
       const latencyMs = Math.round(performance.now() - startTime)
       const data = await res.json().catch(() => null) as {
         status?: string
+        layer?: string
+        execution?: string
         code?: string
         error?: string
         reason?: string
       } | null
 
-      setStats(prev => ({ ...prev, attempts: prev.attempts + 1, blocked: prev.blocked + 1 }))
-
-      if (data?.status === 'blocked') {
-        const isQuarantine = data.code === 'UNTRUSTED_CONTENT_FLAGGED' || data.code === 'QUARANTINE_FAILED'
-        setReport({
-          blocked: true,
-          layer: isQuarantine ? 'Quarantine Firewall' : 'Planner Input Guard',
-          code: data.code,
-          reason: data.error || (data.code ? `Blocked with failure code ${data.code}` : 'Untrusted content flagged by safety quarantine.'),
-          latencyMs,
-          mode: 'guarded',
-        })
-      } else if (data?.status === 'denied') {
-        setReport({
-          blocked: true,
-          layer: 'Policy Guardrails',
-          reason: data.reason || 'Blocked by deterministic wallet policy (recipient not allowlisted or limit exceeded).',
-          latencyMs,
-          mode: 'guarded',
-        })
-      } else {
-        setReport({
-          blocked: true,
-          layer: 'Signer Sandbox',
-          reason: data?.error || 'Execution stopped safely before funds moved.',
-          latencyMs,
-          mode: 'guarded',
-        })
+      if (!res.ok && res.status !== 400) {
+        throw new Error(data?.error || `Arena request failed (${res.status})`)
       }
-    } catch (err: any) {
+      const status = data?.status || 'arena_error'
+      const blocked = ['blocked', 'denied', 'invalid_request'].includes(status)
+      setStats(prev => ({
+        guardedAttempts: prev.guardedAttempts + 1,
+        guardedBlocks: prev.guardedBlocks + Number(blocked),
+        naiveSimulations: prev.naiveSimulations,
+      }))
+      setReport({
+        blocked,
+        layer: data?.layer || 'Arena',
+        status,
+        code: data?.code,
+        reason: data?.reason || data?.error || 'No policy result was returned.',
+        latencyMs,
+        mode: 'guarded',
+      })
+    } catch (err) {
       const latencyMs = Math.round(performance.now() - startTime)
-      setStats(prev => ({ ...prev, attempts: prev.attempts + 1, blocked: prev.blocked + 1 }))
       setReport({
         blocked: true,
-        layer: 'Quarantine Firewall',
-        reason: err?.message || 'Quarantine firewall intercepted request.',
+        layer: 'Connection',
+        status: 'error',
+        reason: err instanceof Error ? err.message : 'Unable to reach the isolated Arena endpoint.',
         latencyMs,
         mode: 'guarded',
       })
@@ -149,10 +142,10 @@ export default function ArenaPage() {
   return (
     <>
       <PageHeading
-        eyebrow="Isolated security playground"
+        eyebrow="No-signer security playground"
         title="Attack Arena"
-        description="Test prompt injections, jailbreaks, and adversarial invoices against the live BambooLeaf firewall and deterministic guardrails."
-        action={<Badge tone="green"><Icon name="lock" size={12} /> Live Firewall Connected</Badge>}
+        description="Preview the quarantined planner and deterministic policy checks. Arena requests never enter the goal-execution or signer path."
+        action={<Badge tone="green"><Icon name="lock" size={12} /> Signer isolated</Badge>}
       />
 
       {/* Preset Attacks Bar */}
@@ -203,7 +196,7 @@ export default function ArenaPage() {
           <p className="text-xs text-slate-400 mb-4">
             {mode === 'guarded'
               ? 'Guarded mode evaluates inputs through the Quarantine Firewall, Groq LLM Planner, and Policy Engine.'
-              : 'Naive mode simulates an unshielded LLM without deterministic security policy.'}
+              : 'Naive mode is a local illustration only; it does not call a model, backend, wallet, or chain.'}
           </p>
 
           <form onSubmit={runAttempt} className="space-y-3">
@@ -249,7 +242,7 @@ export default function ArenaPage() {
               ) : (
                 <>
                   <Icon name="terminal" size={14} />
-                  Run Live Attack Simulation
+                  Run Isolated Policy Preview
                 </>
               )}
             </button>
@@ -266,13 +259,18 @@ export default function ArenaPage() {
               <div className="flex items-center justify-between">
                 <span className="inline-flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide">
                   <Icon name={report.blocked ? 'shield' : 'x'} size={15} />
-                  {report.blocked ? `🛡️ Intercepted by ${report.layer}` : '⚠️ Vulnerability Breached (Naive Model)'}
+                  {report.mode === 'naive'
+                    ? 'Illustrative simulation · not measured'
+                    : report.blocked
+                      ? `Blocked by ${report.layer}`
+                      : `${report.status} · no transaction executed`}
                 </span>
                 <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full bg-white/70 dark:bg-black/30">
                   {report.latencyMs} ms
                 </span>
               </div>
               <p className="text-xs font-medium leading-relaxed">{report.reason}</p>
+              {report.mode === 'guarded' && <p className="text-[11px] font-semibold">Execution: not executed</p>}
               {report.code && (
                 <p className="text-[11px] font-mono font-bold text-lime-800 dark:text-lime-300">
                   Security Code: <span className="underline">{report.code}</span>
@@ -282,17 +280,16 @@ export default function ArenaPage() {
           )}
         </Card>
 
-        {/* Live Scoreboard */}
         <div className="space-y-6">
           <Card className="p-6">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Defense Scoreboard</h2>
-            <p className="text-xs text-slate-400 mb-4">Live sandbox containment telemetry</p>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Session Counters</h2>
+            <p className="text-xs text-slate-400 mb-4">Local UI session only; not a red-team benchmark or N=5 result.</p>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: 'Attacks Tested', value: String(stats.attempts), tone: 'text-slate-900 dark:text-white' },
-                { label: 'Guarded Blocks', value: String(stats.blocked), tone: 'text-[#65A30D] dark:text-lime-400' },
-                { label: 'Naive Model Leaks', value: String(stats.naiveSimulatedBreaches), tone: 'text-rose-600 dark:text-rose-400' },
-                { label: 'Guarded Defense Rate', value: '100%', tone: 'text-[#65A30D] dark:text-lime-400' },
+                { label: 'Guarded previews', value: String(stats.guardedAttempts), tone: 'text-slate-900 dark:text-white' },
+                { label: 'Guarded blocks', value: String(stats.guardedBlocks), tone: 'text-[#65A30D] dark:text-lime-400' },
+                { label: 'Naive illustrations', value: String(stats.naiveSimulations), tone: 'text-amber-600 dark:text-amber-400' },
+                { label: 'Transactions sent', value: '0', tone: 'text-slate-900 dark:text-white' },
               ].map((item) => (
                 <div key={item.label} className="rounded-2xl bg-slate-50 dark:bg-slate-800/60 p-4">
                   <p className="text-[10px] font-bold uppercase text-slate-400">{item.label}</p>

@@ -1,0 +1,80 @@
+import { getAddress } from 'ethers'
+import { getDatabase } from '../db/connection.tsx'
+import {
+  ApprovalError,
+  approveTransfer,
+  getPendingApprovals,
+  rejectTransferApproval,
+} from '../services/approvals.service.tsx'
+
+const approvalIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function authenticatedOwner(request, response) {
+  const configuredOwner = process.env.OWNER_WALLET_ADDRESS
+  const authenticatedWallet = request.deviceSession?.walletAddress
+  if (!configuredOwner || !authenticatedWallet) {
+    response.status(403).json({ error: 'Only the configured owner wallet can manage transaction approvals.' })
+    return null
+  }
+  try {
+    const owner = getAddress(configuredOwner).toLowerCase()
+    if (owner !== getAddress(authenticatedWallet).toLowerCase()) {
+      response.status(403).json({ error: 'Only the configured owner wallet can manage transaction approvals.' })
+      return null
+    }
+    return owner
+  } catch {
+    response.status(503).json({ error: 'OWNER_WALLET_ADDRESS is invalid.' })
+    return null
+  }
+}
+
+async function list(request, response, next) {
+  const owner = authenticatedOwner(request, response)
+  if (!owner) return
+  try {
+    response.json({ approvals: await getPendingApprovals(getDatabase(), owner) })
+  } catch (error) {
+    next(error)
+  }
+}
+
+async function approve(request, response, next) {
+  const owner = authenticatedOwner(request, response)
+  if (!owner) return
+  const approvalId = request.params.approvalId
+  if (!approvalIdPattern.test(approvalId)) {
+    response.status(400).json({ error: 'Approval identifier is invalid.' })
+    return
+  }
+  try {
+    response.json(await approveTransfer(getDatabase(), approvalId, owner, request.requestId))
+  } catch (error) {
+    if (error instanceof ApprovalError) {
+      response.status(error.statusCode).json({ error: error.message })
+      return
+    }
+    next(error)
+  }
+}
+
+async function reject(request, response, next) {
+  const owner = authenticatedOwner(request, response)
+  if (!owner) return
+  const approvalId = request.params.approvalId
+  if (!approvalIdPattern.test(approvalId)) {
+    response.status(400).json({ error: 'Approval identifier is invalid.' })
+    return
+  }
+  try {
+    response.json(await rejectTransferApproval(getDatabase(), approvalId, owner, request.requestId))
+  } catch (error) {
+    if (error instanceof ApprovalError) {
+      response.status(error.statusCode).json({ error: error.message })
+      return
+    }
+    next(error)
+  }
+}
+
+export { approve, list, reject }

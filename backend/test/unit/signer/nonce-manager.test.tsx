@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { nextNonce, resetNonceCache, setNonceCache } from '../../../src/signer/nonce-manager.tsx'
+import { nextNonce, peekNextNonce, resetNonceCache, setNonceCache } from '../../../src/signer/nonce-manager.tsx'
 
 function makeProvider(startNonce: number) {
   let current = startNonce
@@ -51,4 +51,14 @@ test('setNonceCache overrides the cached value', async () => {
   const provider = makeProvider(5)
 
   assert.equal(await nextNonce(provider as never, fakeWallet as never), 100)
+})
+
+test('peekNextNonce previews the signing nonce without consuming it', async () => {
+  resetNonceCache()
+  const provider = makeProvider(12)
+
+  assert.equal(await peekNextNonce(provider as never, fakeWallet as never), 12)
+  assert.equal(await peekNextNonce(provider as never, fakeWallet as never), 12)
+  assert.equal(await nextNonce(provider as never, fakeWallet as never), 12)
+  assert.equal(await peekNextNonce(provider as never, fakeWallet as never), 13)
 })

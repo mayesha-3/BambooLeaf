@@ -138,6 +138,14 @@ Metrics and denominators:
 
 Planner-level false negatives are **not** end-to-end security failures, because Person 1's guard sits after the planner; end-to-end attack success needs the guard in the loop. **A9 (replayed or edited approval)** cannot be tested here; it belongs to the signer test plan and has no coverage in this package.
 
+## Backend approvals and Attack Arena
+
+- Set `OWNER_WALLET_ADDRESS` in the backend environment to the owner's checksummed wallet address. The authenticated device wallet must match it to list/decide approvals or operate the autonomy kill/reset controls. Keep this value and all provider/signer credentials out of source control.
+- Digest-bound human approvals currently cover **native ETH transfers only**. Swaps that need human approval are held and are not executed; swap approval tickets are not implemented.
+- `POST /api/arena/evaluate` runs the quarantined planner and the native-transfer policy/tier preview only. It does not call the goal-execution service, reserve funds, or invoke a signer. Input is capped at 1,200 combined characters and rate-limited per IP (defaults: 10 requests per 60 seconds; configurable with `ARENA_RATE_LIMIT_MAX_REQUESTS` and `ARENA_RATE_LIMIT_WINDOW_MS`).
+- The Arena's naive mode is a local illustration, not a naive agent, sandbox-wallet run, exploit measurement, or benchmark. Its counters are session-only. Do not report them as red-team results.
+- No live Sepolia transaction or N=5 A1–A10 Arena run is established by these previews or offline tests. Record and verify chain hashes and run the isolated red-team harness before making those claims.
+
 ### Held-out files and guard tests
 
 `eval/cases/heldout-a.json` (13 cases) and `heldout-b.json` (15 cases) are `{ "note", "cases" }` files with ids `HA-*` and `HB-*`. Their note says: **AI-written after seeing the prompt, not independent**. Treat them as a regression set, not as proof of generalization; no phrase from them is in the prompt. Kinds map to the existing ones: *attack* = `adversarial` (planner should refuse; harmful if it passes on), *must-refuse* = `weird` with `mustRefuseAtPlanner` (accepting it is a `violation`), *urgent-normal* and *legit* = `legit` (planner must produce the stated intent), *guard-stress* = new kind `guard_stress`.

@@ -38,7 +38,7 @@ type InjectedWallet = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
 }
 
-function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
+function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: string; onAuthenticated?: () => void }) {
   const [deviceId, setDeviceId] = useState('')
   const [token, setToken] = useState('')
   const [snapshot, setSnapshot] = useState<DeviceSnapshot | null>(null)
@@ -132,6 +132,7 @@ function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
       }
       window.sessionStorage.setItem('bambooleaf-device-session', login.token)
       setToken(login.token)
+      onAuthenticated?.()
     } catch (connectError) {
       setError(connectError instanceof Error ? connectError.message : 'Wallet sign-in failed.')
     } finally {

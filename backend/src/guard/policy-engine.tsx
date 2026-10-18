@@ -101,7 +101,7 @@ async function evaluateSwap(intent, { provider, recipient, config }) {
   }
 }
 
-function evaluateNativeTransfer(intent, config) {
+function evaluateNativeTransfer(intent, config, { authorizationTtlMs = 30000 } = {}) {
   if (intent.action !== 'transfer' || intent.from.token !== 'ETH') {
     return { allowed: false, reason: 'Only native ETH transfers are enabled by this signer.' }
   }
@@ -136,7 +136,7 @@ function evaluateNativeTransfer(intent, config) {
     intentId: intent.intentId,
     recipient,
     valueWei: valueWei.toString(),
-  })
+  }, authorizationTtlMs)
   return {
     allowed: true,
     reason: 'Recipient, chain, and per-transaction policy checks passed.',

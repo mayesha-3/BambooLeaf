@@ -14,6 +14,9 @@ async function migrateInitialCollections(database) {
 
   for (const name of [
     COLLECTIONS.auditHeads,
+    COLLECTIONS.policyVersions,
+    COLLECTIONS.autonomyState,
+    COLLECTIONS.approvals,
     COLLECTIONS.goals,
     COLLECTIONS.policyUsage,
     COLLECTIONS.deviceAccounts,

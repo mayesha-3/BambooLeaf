@@ -13,6 +13,7 @@ import WalletPage from './pages/WalletPage'
 import ArenaPage from './pages/ArenaPage'
 import SettingsPage from './pages/SettingsPage'
 import ChatPage from './features/chat/ChatPage'
+import ComplianceConsole from './pages/ComplianceConsole'
 import ProfileDropdown from './components/ProfileDropdown'
 import LiveMarketTicker from './features/market/LiveMarketTicker'
 
@@ -39,6 +40,10 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: IconNa
       { id: 'autonomy', label: 'Autonomy', icon: 'spark' },
       { id: 'wallet', label: 'Wallet', icon: 'wallet' },
     ],
+  },
+  {
+    label: 'COMPLIANCE',
+    items: [{ id: 'compliance', label: 'Compliance Console', icon: 'layers' }],
   },
   {
     label: 'PLAYGROUND',
@@ -162,10 +167,20 @@ export function App() {
 
   const refreshAudit = useCallback(async () => {
     setAuditState((current) => ({ ...current, loading: true, error: '' }))
+    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    if (!token) {
+      setAuditState((current) => ({
+        ...current,
+        valid: null,
+        error: 'Sign in with an authorized owner or auditor wallet to view audit records.',
+        loading: false,
+      }))
+      return
+    }
     try {
       const [eventsResponse, verifyResponse] = await Promise.all([
-        fetch(`${apiBaseUrl}/audit?limit=50`),
-        fetch(`${apiBaseUrl}/audit/verify`),
+        fetch(`${apiBaseUrl}/audit?limit=50`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${apiBaseUrl}/audit/verify`, { headers: { Authorization: `Bearer ${token}` } }),
       ])
       const eventPayload = (await eventsResponse.json()) as { entries?: AuditEntry[]; error?: string }
       const verifyPayload = (await verifyResponse.json()) as { valid?: boolean; checked?: number; error?: string }
@@ -563,6 +578,7 @@ export function App() {
               {page === 'autonomy' && <AutonomyPage />}
               {page === 'wallet' && <WalletPage userProfile={userProfile} />}
               {page === 'arena' && <ArenaPage />}
+              {page === 'compliance' && <ComplianceConsole />}
               {page === 'settings' && (
                 <SettingsPage
                   userProfile={userProfile}
@@ -627,6 +643,7 @@ export function App() {
                 { name: 'Autonomy & Permission Levels', p: 'autonomy' as Page, keywords: 'autonomy level permission trust' },
                 { name: 'Sepolia Testnet Wallet', p: 'wallet' as Page, keywords: 'wallet eth usdc sepolia testnet crypto' },
                 { name: 'Attack Arena Sandbox', p: 'arena' as Page, keywords: 'attack arena sandbox test security' },
+                { name: 'Read-only Compliance Console', p: 'compliance' as Page, keywords: 'compliance auditor audit export verify autonomy policy history' },
                 { name: 'Settings & Security Defaults', p: 'settings' as Page, keywords: 'settings config security preferences' },
               ]
                 .filter((item) => {
@@ -657,6 +674,7 @@ export function App() {
                 { name: 'Autonomy & Permission Levels', p: 'autonomy' as Page, keywords: 'autonomy level permission trust' },
                 { name: 'Sepolia Testnet Wallet', p: 'wallet' as Page, keywords: 'wallet eth usdc sepolia testnet crypto' },
                 { name: 'Attack Arena Sandbox', p: 'arena' as Page, keywords: 'attack arena sandbox test security' },
+                { name: 'Read-only Compliance Console', p: 'compliance' as Page, keywords: 'compliance auditor audit export verify autonomy policy history' },
                 { name: 'Settings & Security Defaults', p: 'settings' as Page, keywords: 'settings config security preferences' },
               ].filter((item) => {
                 const q = searchQuery.toLowerCase()

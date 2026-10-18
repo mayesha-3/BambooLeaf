@@ -4,11 +4,70 @@ import { appendAuditEvent } from '../audit/audit-log.tsx'
 import { planGoal } from '../../llm-planner/src/backend-bridge.ts'
 import { evaluateNativeTransfer, evaluateSwap, readPolicyConfig } from '../guard/policy-engine.tsx'
 import { routeTier } from '../guard/tier-router.tsx'
-import { getLevel } from '../guard/autonomy-manager.tsx'
+import {
+  getLevel,
+  getState,
+  isKillSwitchActive,
+  recordBlockedAttempt,
+  recordCleanExecution,
+} from '../guard/autonomy-manager.tsx'
+import { saveAutonomyState } from '../db/repositories/autonomy.repository.tsx'
+import { createTransferApproval } from './approvals.service.tsx'
 import { reserveTransfer } from '../db/repositories/policy-usage.repository.tsx'
 import { getSigner, getSignerAddress, sendAuthorizedNativeTransfer, sendAuthorizedSwap, simulateAuthorizedSwap } from '../signer/signer-service.tsx'
 import { getToken } from '../chain/token-registry.tsx'
 import { parseUnits } from 'ethers'
+
+async function recordBlocked(database, requestId, reason, critical = false) {
+  const previous = getState()
+  recordBlockedAttempt(reason, critical)
+  const current = getState()
+  await saveAutonomyState(database, current)
+  if (previous.level !== current.level || previous.frozen !== current.frozen) {
+    await appendAuditEvent(database, {
+      requestId,
+      type: 'autonomy.demoted',
+      data: {
+        fromLevel: previous.level,
+        toLevel: current.level,
+        reason,
+        blockedInWindow: current.blockedInWindow,
+        frozen: current.frozen,
+      },
+    })
+  }
+  await appendAuditEvent(database, {
+    requestId,
+    type: 'autonomy.blocked_attempt',
+    data: { reason, critical, level: current.level, frozen: current.frozen },
+  })
+}
+
+async function recordClean(database, requestId) {
+  const previous = getState()
+  recordCleanExecution()
+  const current = getState()
+  if (previous.level !== current.level) {
+    await appendAuditEvent(database, {
+      requestId,
+      type: 'autonomy.promoted',
+      data: {
+        fromLevel: previous.level,
+        toLevel: current.level,
+        reason: 'Ten clean confirmed executions',
+      },
+    })
+  }
+  try {
+    await saveAutonomyState(database, current)
+  } catch (error) {
+    await appendAuditEvent(database, {
+      requestId,
+      type: 'autonomy.state_persistence_failed',
+      data: { reason: error instanceof Error ? error.message : 'Unknown persistence failure' },
+    })
+  }
+}
 
 function goalHash(goal) {
   return createHash('sha256').update(goal).digest('hex')
@@ -48,6 +107,7 @@ async function processSwap(database, intent, summary, policy, requestId) {
     decision = { allowed: false, reason: error instanceof Error ? error.message : 'Swap policy evaluation failed.' }
   }
   if (!decision.allowed) {
+    await recordBlocked(database, requestId, decision.reason)
     await appendAuditEvent(database, {
       requestId, type: 'policy.denied', data: { ...summary, reason: decision.reason },
     })
@@ -84,11 +144,24 @@ async function processSwap(database, intent, summary, policy, requestId) {
   })
   if (tier.tier !== 'T1') {
     const status = tier.tier === 'T2' ? 'approval_required' : 'denied'
+    if (tier.tier === 'T3') {
+      await recordBlocked(database, requestId, tier.reasons.join('; '))
+    }
     await appendAuditEvent(database, {
       requestId, type: tier.tier === 'T2' ? 'approval.required' : 'policy.denied',
-      data: { ...summary, tier: tier.tier, reasons: tier.reasons },
+      data: { ...summary, tier: tier.tier, reasons: tier.reasons, approvalAvailable: false },
     })
-    return { statusCode: 200, body: { requestId, status, tier: tier.tier, intent: summary, reasons: tier.reasons } }
+    return {
+      statusCode: 200,
+      body: {
+        requestId,
+        status,
+        tier: tier.tier,
+        intent: summary,
+        reasons: tier.reasons,
+        ...(tier.tier === 'T2' ? { approvalAvailable: false, reason: 'Human approval is not enabled for swaps.' } : {}),
+      },
+    }
   }
 
   try {
@@ -101,6 +174,7 @@ async function processSwap(database, intent, summary, policy, requestId) {
       scope: `swap:${token.symbol}`,
     })
     if (!reservation.allowed) {
+      await recordBlocked(database, requestId, reservation.reason)
       await appendAuditEvent(database, {
         requestId, type: 'policy.denied', data: { ...summary, reason: reservation.reason },
       })
@@ -129,8 +203,10 @@ async function processSwap(database, intent, summary, policy, requestId) {
       }),
     })
   } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Shadow simulation failed'
+    await recordBlocked(database, requestId, reason, true)
     await appendAuditEvent(database, {
-      requestId, type: 'swap.shadow_simulation_failed', data: { ...summary, reason: error.message },
+      requestId, type: 'swap.shadow_simulation_failed', data: { ...summary, reason },
     })
     return { statusCode: 409, body: { requestId, status: 'not_executed', intent: summary, error: 'Shadow-fork simulation or intent/outcome check failed.' } }
   }
@@ -152,15 +228,18 @@ async function processSwap(database, intent, summary, policy, requestId) {
       txHash: transaction.txHash,
       digest: transaction.digest,
       approvalDigests: transaction.approvalDigests,
+      approvalTxHashes: transaction.approvalTxHashes,
       amountIn: transaction.amountIn,
       minAmountOut: transaction.minAmountOut,
     },
   })
+  await recordClean(database, requestId)
   return {
     statusCode: 200,
     body: {
       requestId, status: transaction.status, tier: tier.tier, intent: summary,
       txHash: transaction.txHash, amountIn: transaction.amountIn, minAmountOut: transaction.minAmountOut,
+      approvalTxHashes: transaction.approvalTxHashes,
     },
   }
 }
@@ -171,6 +250,18 @@ async function processGoal(database, goal, requestId, untrusted?: string[]) {
     type: 'goal.received',
     data: { goalSha256: goalHash(goal), hasUntrusted: Array.isArray(untrusted) && untrusted.length > 0 },
   })
+
+  if (isKillSwitchActive()) {
+    await appendAuditEvent(database, {
+      requestId,
+      type: 'planner.blocked',
+      data: { code: 'KILL_SWITCH_ACTIVE', reason: 'Agent is frozen; planner was not called' },
+    })
+    return {
+      statusCode: 423,
+      body: { requestId, status: 'blocked', code: 'KILL_SWITCH_ACTIVE', error: 'Agent is frozen; nothing was executed.' },
+    }
+  }
 
   let intent
   try {
@@ -189,6 +280,12 @@ async function processGoal(database, goal, requestId, untrusted?: string[]) {
       'BUDGET_EXCEEDED',
     ]
     if (code && blockedCodes.includes(code)) {
+      await recordBlocked(
+        database,
+        requestId,
+        `${code}: ${error.message}`,
+        code === 'UNTRUSTED_CONTENT_FLAGGED',
+      )
       await appendAuditEvent(database, {
         requestId,
         type: 'planner.blocked',
@@ -235,6 +332,7 @@ async function processGoal(database, goal, requestId, untrusted?: string[]) {
 
   const decision = evaluateNativeTransfer(intent, policy)
   if (!decision.allowed) {
+    await recordBlocked(database, requestId, decision.reason)
     await appendAuditEvent(database, {
       requestId,
       type: 'policy.denied',
@@ -243,6 +341,62 @@ async function processGoal(database, goal, requestId, untrusted?: string[]) {
     return {
       statusCode: 200,
       body: { requestId, status: 'denied', intent: summary, reason: decision.reason },
+    }
+  }
+
+  const tier = routeTier({
+    intent,
+    allowedRecipients: policy.allowedRecipients,
+    allowedContracts: policy.allowedContracts,
+    maxPerTxWei: policy.maxPerTxWei,
+    valueWei: BigInt(decision.valueWei),
+    riskScore: 0,
+    forbiddenPatterns: [],
+    autonomyLevel: getLevel(),
+  })
+  await appendAuditEvent(database, {
+    requestId,
+    type: 'policy.tier_routed',
+    data: { ...summary, tier: tier.tier, reasons: tier.reasons },
+  })
+  if (tier.tier !== 'T1') {
+    if (tier.tier === 'T3') {
+      await recordBlocked(database, requestId, tier.reasons.join('; '))
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'policy.denied',
+        data: { ...summary, tier: tier.tier, reasons: tier.reasons },
+      })
+      return { statusCode: 200, body: { requestId, status: 'denied', tier: tier.tier, intent: summary, reasons: tier.reasons } }
+    }
+    try {
+      const approval = await createTransferApproval(database, intent, requestId)
+      return {
+        statusCode: 202,
+        body: {
+          requestId,
+          status: 'approval_required',
+          tier: tier.tier,
+          intent: summary,
+          reasons: approval.reasons,
+          approval: { id: approval.approvalId, digest: approval.digest, expiresAt: approval.expiresAt },
+        },
+      }
+    } catch (error) {
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'approval.creation_failed',
+        data: { ...summary, reason: error instanceof Error ? error.message : 'Unable to create approval request' },
+      })
+      return {
+        statusCode: error.statusCode || 503,
+        body: {
+          requestId,
+          status: 'not_executed',
+          intent: summary,
+          error: error instanceof Error ? error.message : 'Unable to create approval request.',
+        },
+      }
     }
   }
 
@@ -317,6 +471,7 @@ async function processGoal(database, goal, requestId, untrusted?: string[]) {
     type: 'transaction.confirmed',
     data: { ...summary, txHash: transaction.txHash, digest: transaction.digest },
   })
+  await recordClean(database, requestId)
   return {
     statusCode: 200,
     body: { requestId, status: transaction.status, intent: summary, txHash: transaction.txHash },

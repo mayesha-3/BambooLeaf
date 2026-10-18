@@ -277,7 +277,7 @@ export default function ActivityPage({ auditState, refreshAudit }: ActivityPageP
           </>
         )}
       </Card>
-      <DeviceSecurityPanel apiBaseUrl={apiBaseUrl} />
+      <DeviceSecurityPanel apiBaseUrl={apiBaseUrl} onAuthenticated={refreshAudit} />
     </>
   )
 }

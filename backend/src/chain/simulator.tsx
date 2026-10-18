@@ -162,9 +162,9 @@ export async function simulateShadowFork(
       const receipt = await provider.waitForTransaction(txHash)
       if (!receipt || receipt.status !== 1) throw new Error(`Fork transaction ${txHash} failed`)
             receipts.push(receipt)
-      // Extract contract addresses from logs instead of trace
-      for (const log of receipt.logs) {
-        calledAddresses.add(getAddress(log.address))
+      const trace = await rpc(provider, 'debug_traceTransaction', [txHash, { tracer: 'callTracer' }])
+      for (const address of traceAddresses(trace)) {
+        calledAddresses.add(address)
       }
     }
     const after = await readTokenBalances(provider, accounts, tokenAddresses)
