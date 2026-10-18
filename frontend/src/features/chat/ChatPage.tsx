@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { UserProfile } from '../../types'
+import { useApprovals } from '../../lib/hooks/useApprovals'
 
 interface BalanceCard { kind: 'balance'; eth: string; usdc: string; total: string; change: string }
 interface TransactionCard { kind: 'transaction'; status: 'confirmed' | 'pending' | 'blocked'; type: string; amount: string; to: string; hash?: string; reason?: string }
@@ -270,6 +271,7 @@ function TypingIndicator() {
 }
 
 function ContextPanel({ width, onResizeStart, userProfile }: { width: number; onResizeStart: (e: React.MouseEvent) => void; userProfile?: UserProfile }) {
+  const { count: approvalsCount } = useApprovals()
   const [walletData, setWalletData] = useState<any>(null)
   const apiUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
 
@@ -346,8 +348,17 @@ function ContextPanel({ width, onResizeStart, userProfile }: { width: number; on
         </div>
 
         <div>
-          <div className="flex items-center justify-between mb-2.5"><p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Pending approvals</p><span className="bg-amber-400 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-full">0</span></div>
-          <p className="text-[11px] text-slate-400">No pending approvals</p>
+          <div className="flex items-center justify-between mb-2.5">
+            <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Pending approvals</p>
+            <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-full transition-all ${
+              approvalsCount > 0 ? 'bg-amber-400 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+            }`}>
+              {approvalsCount}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-400">
+            {approvalsCount > 0 ? `${approvalsCount} approval${approvalsCount > 1 ? 's' : ''} awaiting signature` : 'No pending approvals'}
+          </p>
         </div>
         <div>
           <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2.5">Active guardrails</p>
@@ -365,9 +376,6 @@ function ContextPanel({ width, onResizeStart, userProfile }: { width: number; on
   )
 }
 
-const demoMessages: Message[] = [
-  { id: '0', role: 'system', text: 'BambooLeaf Agent connected · Sepolia testnet · Policy active', ts: new Date() },
-]
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
 

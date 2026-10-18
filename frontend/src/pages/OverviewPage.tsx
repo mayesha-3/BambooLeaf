@@ -66,7 +66,6 @@ export default function OverviewPage({
   const [chartPeriod, setChartPeriod] = useState<'7d' | '30d' | '90d'>('7d')
   const [chartType, setChartType] = useState<'bar' | 'line'>('bar')
   const [selectedDayIndex, setSelectedDayIndex] = useState<number>(6)
-  const [activeCardIndex, setActiveCardIndex] = useState<number>(0)
 
   // Fetch Live Wallet Balance
   useEffect(() => {

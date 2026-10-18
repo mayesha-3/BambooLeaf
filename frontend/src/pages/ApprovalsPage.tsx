@@ -1,71 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import Icon from '../components/ui/Icon'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import PageHeading from '../components/ui/PageHeading'
-
-interface ApprovalItem {
-  id: string
-  action: string
-  amount: string
-  receive: string
-  recipient: string
-  risk: string
-  reason: string
-  secondsLeft: number
-  tone: 'green' | 'amber' | 'rose'
-  digest: string
-  tier: 'Tier 2 · Owner Approval Required' | 'Tier 3 · High Value Multi-sig'
-  calldata: string
-}
-
-const initialApprovals: ApprovalItem[] = [
-  {
-    id: 'ap-1042',
-    action: 'Swap USDC → ETH',
-    amount: '12.00 USDC',
-    receive: '~0.0041 ETH',
-    recipient: '0xe2463837df0a08d3d1728a0cef444a57a879b1dd',
-    risk: 'T2 Policy Check',
-    reason: 'Exceeds autonomous auto-swap threshold ($10.00). Slippage cap validated at 0.50%.',
-    secondsLeft: 245,
-    tone: 'amber',
-    digest: '0xa7b98d249f01bb49858de59bbd8b9bc2b84a9e102fca9b1192',
-    tier: 'Tier 2 · Owner Approval Required',
-    calldata: '0x38ed1739000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48...',
-  },
-  {
-    id: 'ap-1041',
-    action: 'Transfer ETH',
-    amount: '0.025 ETH',
-    receive: 'External Recipient',
-    recipient: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
-    risk: 'Unsaved Recipient',
-    reason: 'Destination address is not present in saved contacts. Requires explicit approval before signer acts.',
-    secondsLeft: 580,
-    tone: 'rose',
-    digest: '0xf41b9c77102eacb92019ffab52817d9834ba12891901eeaa83',
-    tier: 'Tier 2 · Owner Approval Required',
-    calldata: '0x',
-  },
-]
+import { useApprovals, type ApprovalItem } from '../lib/hooks/useApprovals'
 
 export default function ApprovalsPage() {
-  const [items, setItems] = useState<ApprovalItem[]>(initialApprovals)
+  const { items, decide: decideItem, reset: resetDemoQueue } = useApprovals()
   const [notice, setNotice] = useState<{ message: string; tone: 'green' | 'rose' } | null>(null)
   const [inspectingItem, setInspectingItem] = useState<ApprovalItem | null>(null)
-
-  // Countdown timer
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setItems((prev) =>
-        prev
-          .map((item) => ({ ...item, secondsLeft: Math.max(0, item.secondsLeft - 1) }))
-          .filter((item) => item.secondsLeft > 0)
-      )
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [])
 
   function formatTime(secs: number) {
     const m = Math.floor(secs / 60)
@@ -74,7 +17,7 @@ export default function ApprovalsPage() {
   }
 
   function decide(item: ApprovalItem, approved: boolean) {
-    setItems((current) => current.filter((it) => it.id !== item.id))
+    decideItem(item, approved)
     if (approved) {
       setNotice({
         message: `✓ Approval confirmed for ${item.id}. Transaction digest signed: ${item.digest.slice(0, 16)}…`,
@@ -89,24 +32,8 @@ export default function ApprovalsPage() {
     setInspectingItem(null)
   }
 
-  function resetDemoQueue() {
-    setItems([
-      ...initialApprovals,
-      {
-        id: `ap-${Math.floor(1000 + Math.random() * 9000)}`,
-        action: 'Approve USDC Spend',
-        amount: '50.00 USDC',
-        receive: 'Uniswap V2 Router',
-        recipient: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D',
-        risk: 'Allowance Grant',
-        reason: 'ERC-20 token spend allowance request. Strict allowance matching transaction amount only.',
-        secondsLeft: 300,
-        tone: 'green',
-        digest: '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(''),
-        tier: 'Tier 2 · Owner Approval Required',
-        calldata: '0x095ea7b30000000000000000000000007a250d5630b4cf539739df2c5dacb4c659f2488d...',
-      },
-    ])
+  function handleReset() {
+    resetDemoQueue()
     setNotice(null)
   }
 
@@ -257,7 +184,7 @@ export default function ApprovalsPage() {
           <h2 className="mt-4 text-sm font-bold text-slate-900 dark:text-white">Queue is clear</h2>
           <p className="mt-1 text-xs text-slate-400">There are no pending approvals requiring human review.</p>
           <button
-            onClick={resetDemoQueue}
+            onClick={handleReset}
             className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:border-lime-500 transition"
           >
             <Icon name="refresh" size={13} /> Reload Simulated Approvals
