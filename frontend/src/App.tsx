@@ -46,9 +46,45 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: IconNa
   },
 ]
 
+const validPages: Page[] = ['overview', 'chat', 'activity', 'approvals', 'policy', 'autonomy', 'wallet', 'arena', 'settings']
+
+function getInitialPage(): Page {
+  if (typeof window !== 'undefined') {
+    const hash = window.location.hash.replace(/^#\/?/, '').trim() as Page
+    if (validPages.includes(hash)) return hash
+    try {
+      const saved = localStorage.getItem('bambooleaf_current_page') as Page
+      if (saved && validPages.includes(saved)) {
+        window.location.hash = `/${saved}`
+        return saved
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return 'chat'
+}
+
 export function App() {
   const { count: approvalsCount } = useApprovals()
-  const [page, setPage] = useState<Page>('chat')
+  const [page, setPage] = useState<Page>(getInitialPage)
+
+  // Listen to browser back/forward buttons or direct hash change
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace(/^#\/?/, '').trim() as Page
+      if (validPages.includes(hash)) {
+        setPage(hash)
+        try {
+          localStorage.setItem('bambooleaf_current_page', hash)
+        } catch {
+          // ignore
+        }
+      }
+    }
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showGoalModal, setShowGoalModal] = useState(false)
@@ -225,6 +261,12 @@ export function App() {
 
   const navigate = (nextPage: Page) => {
     setPage(nextPage)
+    window.location.hash = `/${nextPage}`
+    try {
+      localStorage.setItem('bambooleaf_current_page', nextPage)
+    } catch {
+      // ignore
+    }
     setMobileNavOpen(false)
   }
 
