@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import type { UserProfile } from '../../types'
 
 interface BalanceCard { kind: 'balance'; eth: string; usdc: string; total: string; change: string }
 interface TransactionCard { kind: 'transaction'; status: 'confirmed' | 'pending' | 'blocked'; type: string; amount: string; to: string; hash?: string; reason?: string }
@@ -8,7 +9,7 @@ interface SwapCard { kind: 'swap'; from: string; to: string; amount: string; rat
 type RichCard = BalanceCard | TransactionCard | PolicyCard | ApprovalCard | SwapCard
 type MessageRole = 'user' | 'agent' | 'system'
 interface ToolCall { name: string; status: 'running' | 'done' | 'failed'; detail?: string }
-interface Message { id: string; role: MessageRole; text?: string; cards?: RichCard[]; toolCalls?: ToolCall[]; ts: Date }
+interface Message { id: string; role: MessageRole; text?: string; untrusted?: string[]; cards?: RichCard[]; toolCalls?: ToolCall[]; ts: Date }
 
 function Icon({ d, size = 18, className = '' }: { d: ReactNode; size?: number; className?: string }) {
   return (
@@ -29,6 +30,7 @@ const Icons = {
   arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
   lock: <><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>,
   external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6" /></>,
+  paperclip: <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />,
 }
 
 function BalanceCardView({ card }: { card: BalanceCard }) {
@@ -150,35 +152,56 @@ function ToolCallIndicator({ calls }: { calls: ToolCall[] }) {
   return (
     <div className="mt-2 space-y-1.5">
       {calls.map((call, i) => (
-        <div key={i} className="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+        <div key={i} className="flex items-center gap-2 text-[11px] font-mono text-slate-500 dark:text-slate-400">
           {call.status === 'running' && <span className="w-3 h-3 rounded-full border-2 border-[#84CC16] border-t-transparent animate-spin" />}
           {call.status === 'done' && <span className="w-3 h-3 rounded-full bg-[#84CC16] flex items-center justify-center shrink-0"><svg width="7" height="7" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></span>}
           {call.status === 'failed' && <span className="w-3 h-3 rounded-full bg-rose-400 text-white text-[7px] flex items-center justify-center shrink-0">✕</span>}
-          <span className="text-slate-600">{call.name}</span>
-          {call.detail && <span className="text-slate-400">· {call.detail}</span>}
+          <span className="text-slate-600 dark:text-slate-300">{call.name}</span>
+          {call.detail && <span className="text-slate-400 dark:text-slate-500">· {call.detail}</span>}
         </div>
       ))}
     </div>
   )
 }
 
-function MessageBubble({ msg }: { msg: Message }) {
+function MessageBubble({ msg, userProfile }: { msg: Message; userProfile?: UserProfile }) {
   const isUser = msg.role === 'user'
   if (msg.role === 'system') return (
     <div className="flex justify-center py-1">
       <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-full px-3 py-1">{msg.text}</span>
     </div>
   )
+
+  const userInitial = userProfile?.name ? userProfile.name.charAt(0).toUpperCase() : 'U'
+  const userAvatarGradient = userProfile?.avatarColor || 'from-[#65A30D] to-[#84CC16]'
+  const userName = userProfile?.name || 'You'
+
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {!isUser && <div className="w-8 h-8 rounded-2xl bg-[#F0FDF4] dark:bg-lime-950/40 border border-lime-100 dark:border-lime-900/50 flex items-center justify-center shrink-0 mt-1 shadow-sm"><Icon d={Icons.spark} size={16} className="text-[#65A30D] dark:text-lime-400" /></div>}
-      {isUser && <div className="w-8 h-8 rounded-2xl bg-slate-900 dark:bg-lime-400 flex items-center justify-center shrink-0 mt-1 shadow-sm"><span className="text-white dark:text-black text-xs font-extrabold">M</span></div>}
+      {isUser && (
+        <div
+          className={`w-8 h-8 rounded-2xl bg-gradient-to-tr ${userAvatarGradient} text-white font-black text-xs flex items-center justify-center shrink-0 mt-1 shadow-sm ring-2 ring-white dark:ring-slate-800`}
+          title={userName}
+        >
+          {userInitial}
+        </div>
+      )}
       <div className={`flex-1 max-w-[85%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
         <div className={`flex items-center gap-2 mb-1 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">{isUser ? 'You' : 'BambooLeaf Agent'}</span>
+          <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
+            {isUser ? userName : 'BambooLeaf Agent'}
+          </span>
           <span className="text-[10px] text-slate-300 dark:text-slate-600">{msg.ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
         {msg.text && <div className={`px-4 py-3 rounded-2xl text-xs leading-relaxed font-medium ${isUser ? 'bg-slate-900 dark:bg-[#84CC16] text-white dark:text-slate-950 rounded-tr-sm' : 'bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 text-slate-800 dark:text-slate-100 shadow-sm rounded-tl-sm'}`}>{msg.text}</div>}
+        {msg.untrusted && msg.untrusted.length > 0 && (
+          <div className="mt-1.5 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-[11px] max-w-full">
+            <Icon d={Icons.paperclip} size={12} className="shrink-0" />
+            <span className="font-semibold shrink-0">Attached memo:</span>
+            <span className="truncate italic">{msg.untrusted.join('; ')}</span>
+          </div>
+        )}
         {msg.toolCalls && msg.toolCalls.length > 0 && <div className="mt-1 px-1"><ToolCallIndicator calls={msg.toolCalls} /></div>}
         {msg.cards?.map((card, i) => <RichCardRenderer key={i} card={card} />)}
       </div>
@@ -199,7 +222,7 @@ function TypingIndicator() {
   )
 }
 
-function ContextPanel({ width, onResizeStart }: { width: number; onResizeStart: (e: React.MouseEvent) => void }) {
+function ContextPanel({ width, onResizeStart, userProfile }: { width: number; onResizeStart: (e: React.MouseEvent) => void; userProfile?: UserProfile }) {
   return (
     <aside className="hidden xl:flex flex-col shrink-0 border-l border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0c1220] overflow-y-auto relative transition-colors" style={{ width }}>
       {/* Resize handle */}
@@ -217,6 +240,22 @@ function ContextPanel({ width, onResizeStart }: { width: number; onResizeStart: 
       </div>
       <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800/80"><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">Live Context</p></div>
       <div className="px-5 py-4 space-y-5 flex-1">
+        {userProfile && (
+          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 flex items-center gap-3 shadow-sm">
+            <div className={`w-9 h-9 rounded-xl bg-gradient-to-tr ${userProfile.avatarColor || 'from-[#65A30D] to-[#84CC16]'} text-white font-black text-xs flex items-center justify-center shrink-0 shadow-sm ring-1 ring-white/10`}>
+              {userProfile.name?.charAt(0).toUpperCase() || 'U'}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{userProfile.name}</p>
+                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-lime-100 dark:bg-lime-950 text-[#65A30D] dark:text-lime-400">
+                  Owner
+                </span>
+              </div>
+              <p className="text-[10px] font-mono text-slate-400 truncate mt-0.5">{userProfile.handle}</p>
+            </div>
+          </div>
+        )}
         <div>
           <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2.5">Wallet</p>
           <div className="rounded-2xl p-4 text-white overflow-hidden relative shadow-sm" style={{ background: 'linear-gradient(135deg, #82C91E 0%, #65A30D 100%)' }}>
@@ -297,14 +336,109 @@ const demoMessages: Message[] = [
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
 
-async function getAgentResponse(userText: string): Promise<Message> {
+async function getAgentResponse(userText: string, untrusted?: string[]): Promise<Message> {
   const lower = userText.toLowerCase()
   const id = crypto.randomUUID()
   try {
-    const res = await fetch(`${apiBaseUrl}/goal`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ goal: userText }), signal: AbortSignal.timeout(6000) })
-    if (res.ok) {
-      const data = await res.json() as { status?: string; txHash?: string; reason?: string }
-      return { id, role: 'agent', text: data.txHash ? `Transaction confirmed! Hash: ${data.txHash}` : data.reason || `Status: ${data.status ?? 'submitted'}`, cards: data.txHash ? [{ kind: 'transaction', status: 'confirmed', type: 'Goal execution', amount: '', to: data.txHash, hash: data.txHash } as TransactionCard] : undefined, ts: new Date() }
+    const payload: { goal: string; untrusted?: string[] } = { goal: userText }
+    if (untrusted && untrusted.length > 0) {
+      payload.untrusted = untrusted
+    }
+    const res = await fetch(`${apiBaseUrl}/goal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000),
+    })
+
+    const data = await res.json().catch(() => null) as {
+      status?: string
+      txHash?: string
+      reason?: string
+      error?: string
+      code?: string
+      intent?: any
+    } | null
+
+    if (data) {
+      // Handle typed planner failure codes
+      if (data.status === 'blocked' && data.code) {
+        const codeMessages: Record<string, string> = {
+          UNTRUSTED_CONTENT_FLAGGED: 'The attached document was flagged as potentially malicious and blocked. No transaction was executed.',
+          QUARANTINE_FAILED: 'Security quarantine check could not complete. Please try again.',
+          INPUT_INVALID: 'Your goal text is invalid — it may be empty, too long, or contain unsupported characters.',
+          MODEL_REFUSED: 'The AI planner refused this request. The action may be unsupported or out of scope.',
+          INVALID_OUTPUT: 'The AI planner returned a malformed response. Please try rephrasing your goal.',
+          UNGROUNDED_RECIPIENT: 'The recipient address could not be verified from your input.',
+          UNKNOWN_CONTACT: 'The named contact was not found in your address book.',
+          PROVIDERS_UNAVAILABLE: 'AI providers are temporarily unreachable. Please try again in a moment.',
+          BUDGET_EXCEEDED: 'Token or quota limit for this planning session was exceeded.',
+        }
+        return {
+          id,
+          role: 'agent',
+          text: `⚠ ${codeMessages[data.code] || data.error || 'Blocked, nothing executed.'}`,
+          toolCalls: [{ name: 'quarantine.inspect(attachment)', status: 'failed' as const, detail: data.code }],
+          cards: [{
+            kind: 'transaction',
+            status: 'blocked',
+            type: 'Quarantine Blocked',
+            amount: '',
+            to: 'Quarantine Firewall',
+            reason: data.error || codeMessages[data.code] || 'Untrusted content flagged',
+          } as TransactionCard],
+          ts: new Date(),
+        }
+      }
+
+      if (data.status === 'denied') {
+        return {
+          id,
+          role: 'agent',
+          text: `⚠ Policy denied: ${data.reason || 'Transaction violates wallet security policy.'}`,
+          toolCalls: [{ name: 'policy.evaluate(intent)', status: 'failed' as const, detail: 'Policy Denied' }],
+          cards: [{
+            kind: 'transaction',
+            status: 'blocked',
+            type: data.intent?.action ? `${data.intent.action.toUpperCase()} ${data.intent.amount ?? ''} ${data.intent.token ?? ''}`.trim() : 'Policy Denied',
+            amount: data.intent?.amount ? `${data.intent.amount} ${data.intent.token}` : '',
+            to: data.intent?.recipient || 'External',
+            reason: data.reason || 'Denied by policy guardrails',
+          } as TransactionCard],
+          ts: new Date(),
+        }
+      }
+
+      if (data.status === 'not_executed') {
+        return {
+          id,
+          role: 'agent',
+          text: `⚠ ${data.error || 'Transaction could not be executed.'}`,
+          toolCalls: [{ name: 'signer.broadcast()', status: 'failed' as const, detail: data.error || 'Execution halted' }],
+          ts: new Date(),
+        }
+      }
+
+      if (data.txHash || data.status === 'confirmed') {
+        return {
+          id,
+          role: 'agent',
+          text: `Transaction confirmed on-chain! Hash: ${data.txHash || 'confirmed'}`,
+          toolCalls: [
+            { name: 'policy.validate()', status: 'done', detail: 'Approved' },
+            { name: 'signer.broadcast()', status: 'done', detail: 'Confirmed' },
+          ],
+          cards: [{
+            kind: 'transaction',
+            status: 'confirmed',
+            type: data.intent?.action ? `${data.intent.action} ${data.intent.amount || ''} ${data.intent.token || ''}`.trim() : 'Execution confirmed',
+            amount: data.intent?.amount ? `${data.intent.amount} ${data.intent.token}` : '',
+            to: data.intent?.recipient || 'Recipient',
+            hash: data.txHash,
+          } as TransactionCard],
+          ts: new Date(),
+        }
+      }
     }
   } catch { /* fall through */ }
   await new Promise(r => setTimeout(r, 1000 + Math.random() * 800))
@@ -315,12 +449,40 @@ async function getAgentResponse(userText: string): Promise<Message> {
   return { id, role: 'agent', text: `I understand: "${userText}". Analyzing against policy limits… (Demo mode — backend not reachable)`, toolCalls: [{ name: 'policy.validate(goal)', status: 'done', detail: 'Checks passed' }], ts: new Date() }
 }
 
-const quickPrompts = ['Check my balance', 'Swap 20 USDC to ETH', 'Send 0.01 ETH to Mayesha', 'Show policy limits']
+const quickPrompts = ['Check my balance', 'Swap 20 USDC to ETH', 'Send 0.01 ETH to 0xe2463837df0a08d3d1728a0cef444a57a879b1dd', 'Show policy limits']
 
-export default function ChatPage() {
+interface ChatPageProps {
+  userProfile?: UserProfile
+}
+
+export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {}) {
+  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
+    if (propProfile) return propProfile
+    try {
+      const saved = localStorage.getItem('bambooleaf_user_profile')
+      if (saved) return JSON.parse(saved)
+    } catch {}
+    return {
+      name: 'Mayes',
+      handle: 'owner@bambooleaf.eth',
+      email: 'mayes@bambooleaf.eth',
+      walletAddress: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+      role: 'Primary Signer · Workspace Owner',
+      avatarColor: 'from-[#65A30D] to-[#84CC16]',
+      bio: 'Guarded agent workspace administrator on Sepolia testnet.',
+      telegram: '@mayes_guard',
+      cardName: 'MAYES · OWNER',
+    }
+  })
+
+  useEffect(() => {
+    if (propProfile) setUserProfile(propProfile)
+  }, [propProfile])
   const [messages, setMessages] = useState<Message[]>(demoMessages)
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [showAttachment, setShowAttachment] = useState(false)
+  const [attachmentText, setAttachmentText] = useState('')
   const [contextPanelWidth, setContextPanelWidth] = useState(280)
   const contextResizing = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -357,11 +519,23 @@ export default function ChatPage() {
 
   async function send(text: string) {
     const trimmed = text.trim()
+    const untrustedTrimmed = attachmentText.trim()
     if (!trimmed || isTyping) return
-    setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'user', text: trimmed, ts: new Date() }])
+
+    const untrustedList = untrustedTrimmed ? [untrustedTrimmed] : undefined
+
+    setMessages(prev => [...prev, {
+      id: crypto.randomUUID(),
+      role: 'user',
+      text: trimmed,
+      untrusted: untrustedList,
+      ts: new Date(),
+    }])
     setInput('')
+    setAttachmentText('')
+    setShowAttachment(false)
     setIsTyping(true)
-    const agentMsg = await getAgentResponse(trimmed)
+    const agentMsg = await getAgentResponse(trimmed, untrustedList)
     setIsTyping(false)
     setMessages(prev => [...prev, agentMsg])
   }
@@ -373,20 +547,56 @@ export default function ChatPage() {
     <div className="flex h-full overflow-hidden bg-[#FBFBFC] dark:bg-[#090e1a] transition-colors">
       <div className="flex flex-col flex-1 h-full min-w-0">
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 space-y-5">
-          {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
+          {messages.map(msg => <MessageBubble key={msg.id} msg={msg} userProfile={userProfile} />)}
           {isTyping && <TypingIndicator />}
           <div ref={bottomRef} />
         </div>
         <div className="border-t border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0c1220] px-4 sm:px-6 py-4 space-y-3 transition-colors">
-          <div className="flex flex-wrap gap-2">
-            {quickPrompts.map(p => (
-              <button key={p} onClick={() => send(p)} disabled={isTyping} className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-full px-3 py-1.5 hover:border-[#84CC16] hover:text-[#65A30D] dark:hover:text-lime-400 transition disabled:opacity-50">{p}</button>
-            ))}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
+              {quickPrompts.map(p => (
+                <button key={p} onClick={() => send(p)} disabled={isTyping} className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-full px-3 py-1.5 hover:border-[#84CC16] hover:text-[#65A30D] dark:hover:text-lime-400 transition disabled:opacity-50">{p}</button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAttachment(prev => !prev)}
+              className={`inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-3 py-1.5 transition ${showAttachment ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 border border-dashed border-slate-300 dark:border-slate-700'}`}
+            >
+              <Icon d={Icons.paperclip} size={12} />
+              {showAttachment ? 'Close memo' : 'Attach invoice / memo'}
+            </button>
           </div>
+
+          {showAttachment && (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-50/60 dark:bg-amber-950/20 p-3.5 space-y-2 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+                  <Icon d={Icons.shield} size={13} className="text-amber-600 dark:text-amber-400" />
+                  Untrusted Content · Inspected by Quarantine
+                </span>
+                <button type="button" onClick={() => { setShowAttachment(false); setAttachmentText('') }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold">
+                  ✕ Cancel
+                </button>
+              </div>
+              <textarea
+                value={attachmentText}
+                onChange={e => setAttachmentText(e.target.value)}
+                placeholder="Paste invoice text, memo, or external payment details to be inspected before planning..."
+                rows={2}
+                maxLength={2000}
+                className="w-full resize-none rounded-xl border border-amber-200/80 dark:border-amber-900/60 bg-white dark:bg-slate-900 p-2.5 text-xs font-mono text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+              />
+              <p className="text-[10px] text-amber-800/80 dark:text-amber-400/80 font-medium">
+                Quarantine guard blocks prompt injection or malicious transaction commands.
+              </p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="flex items-end gap-3">
             <div className="flex-1 relative">
               <textarea ref={inputRef} id="chat-input" value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
-                placeholder="Describe a goal… e.g. 'Swap 20 USDC to ETH' or 'Check my balance'"
+                placeholder="Describe a goal… e.g. 'Swap 20 USDC to ETH' or 'Pay invoice'"
                 rows={1} disabled={isTyping}
                 className="w-full resize-none rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 py-3 pr-10 text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-[#84CC16] focus:bg-white dark:focus:bg-slate-900/90 focus:ring-4 focus:ring-lime-500/10 outline-none transition disabled:opacity-60 leading-6"
                 style={{ minHeight: '48px', maxHeight: '120px' }}
@@ -405,7 +615,7 @@ export default function ChatPage() {
           </p>
         </div>
       </div>
-      <ContextPanel width={contextPanelWidth} onResizeStart={handleContextResizeStart} />
+      <ContextPanel width={contextPanelWidth} onResizeStart={handleContextResizeStart} userProfile={userProfile} />
     </div>
   )
 }

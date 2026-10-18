@@ -52,19 +52,19 @@ export function resolveIntents(raw: RawIntent[], opts: ResolveOptions): Intent[]
           if (!goalContainsContact(opts.goal, found[0])) {
             throw new ResolutionError('UNGROUNDED_RECIPIENT', 'Contact name does not appear in the owner goal')
           }
-          return { ...base, action: 'transfer', from: r.from, recipient: { address: getAddress(found[1]), source: 'address_book', contactName: found[0] } }
+          return { ...base, action: 'transfer', from: { token: r.from.token, amount: r.from.amount }, recipient: { address: getAddress(found[1]), source: 'address_book', contactName: found[0] } }
         }
         if (!goalContainsAddress(opts.goal, rec.address)) {
           throw new ResolutionError('UNGROUNDED_RECIPIENT', 'Address does not appear verbatim in the owner goal')
         }
-        return { ...base, action: 'transfer', from: r.from, recipient: { address: rec.address, source: 'user_text' } }
+        return { ...base, action: 'transfer', from: { token: r.from.token, amount: r.from.amount }, recipient: { address: rec.address, source: 'user_text' } }
       }
       case 'swap':
-        return { ...base, action: 'swap', from: r.from, to: r.to, maxSlippageBps: r.maxSlippageBps ?? opts.defaultSlippageBps }
+        return { ...base, action: 'swap', from: { token: r.from.token, amount: r.from.amount }, to: { token: r.to.token }, maxSlippageBps: r.maxSlippageBps ?? opts.defaultSlippageBps }
       case 'read_balance':
         return { ...base, action: 'read_balance', ...(r.token ? { token: r.token } : {}) }
       case 'read_quote':
-        return { ...base, action: 'read_quote', from: r.from, to: r.to }
+        return { ...base, action: 'read_quote', from: { token: r.from.token, amount: r.from.amount }, to: { token: r.to.token } }
     }
   })
 }

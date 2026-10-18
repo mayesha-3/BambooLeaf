@@ -187,11 +187,11 @@ function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
     snapshot?.blocks.some((block) => block.type === type && block.target === target) ?? false
 
   return (
-    <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-labelledby="device-security-heading">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
+    <section className="mt-6 overflow-hidden rounded-3xl border border-slate-100/90 dark:border-slate-800/80 bg-white dark:bg-[#0f172a] shadow-sm text-slate-900 dark:text-slate-100 transition-colors duration-200" aria-labelledby="device-security-heading">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800/80 px-6 py-5">
         <div>
-          <h2 id="device-security-heading" className="text-sm font-bold text-slate-900">Devices & sign-in attempts</h2>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">
+          <h2 id="device-security-heading" className="text-sm font-bold text-slate-900 dark:text-white">Devices & sign-in attempts</h2>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500 dark:text-slate-400">
             Wallet signatures verify ownership. We record IP address, browser, operating system, device type, and sign-in outcomes. Websites cannot read a device’s MAC address or reliably determine its location.
           </p>
         </div>
@@ -200,7 +200,7 @@ function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
             type="button"
             onClick={() => void signOut()}
             disabled={busy}
-            className="rounded-full border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition"
           >
             Sign out
           </button>
@@ -209,7 +209,7 @@ function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
             type="button"
             onClick={() => void connectWallet()}
             disabled={busy || !deviceId}
-            className="rounded-full bg-slate-950 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+            className="rounded-full bg-slate-950 dark:bg-lime-400 dark:text-slate-950 dark:hover:bg-lime-300 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-50 shadow-sm transition"
           >
             {busy ? 'Connecting…' : 'Connect wallet'}
           </button>
@@ -217,13 +217,13 @@ function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
       </div>
 
       {error && (
-        <p role="alert" className="mx-6 mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+        <p role="alert" className="mx-6 mt-4 rounded-lg border border-rose-200 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-xs text-rose-800 dark:text-rose-300">
           {error}
         </p>
       )}
 
       {!token ? (
-        <p className="px-6 py-8 text-center text-xs text-slate-500">
+        <p className="px-6 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
           Connect and sign with your wallet to view all recorded devices and manage access. The first wallet-verified device becomes primary.
         </p>
       ) : (
@@ -231,20 +231,20 @@ function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
           {snapshot && (
             <>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-slate-600">
-                  Wallet <span className="font-mono">{snapshot.walletAddress}</span>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Wallet <span className="font-mono text-slate-900 dark:text-white">{snapshot.walletAddress}</span>
                 </p>
-                <p className={`text-xs font-bold ${isPrimary ? 'text-lime-700' : 'text-slate-500'}`}>
+                <p className={`text-xs font-bold ${isPrimary ? 'text-[#65A30D] dark:text-lime-400' : 'text-slate-500 dark:text-slate-400'}`}>
                   {isPrimary ? 'This is the primary device' : 'Only the primary device can manage blocks'}
                 </p>
               </div>
 
               <div>
-                <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">
+                <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Known devices ({snapshot.devices.length})
                 </h3>
                 {snapshot.devices.length === 0 ? (
-                  <p className="text-xs text-slate-500">No device records found.</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">No device records found.</p>
                 ) : (
                   <div className="space-y-3">
                     {snapshot.devices.map((device) => {
@@ -254,16 +254,16 @@ function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
                       const blockedIp = isBlocked('ip', device.ip)
                       const canManage = isPrimary && !current
                       return (
-                        <div key={device.deviceId} className="rounded-xl border border-slate-200 p-4">
+                        <div key={device.deviceId} className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 bg-slate-50/50 dark:bg-slate-900/40">
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                              <p className="text-sm font-semibold text-slate-900">
+                              <p className="text-sm font-semibold text-slate-900 dark:text-white">
                                 {device.deviceType} · {device.operatingSystem} · {device.browser}
-                                {primary && <span className="ml-2 rounded-full bg-lime-50 px-2 py-1 text-[10px] font-bold text-lime-800">Primary</span>}
-                                {current && <span className="ml-2 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-700">This device</span>}
+                                {primary && <span className="ml-2 rounded-full bg-lime-50 dark:bg-lime-950/50 px-2 py-1 text-[10px] font-bold text-lime-800 dark:text-lime-300">Primary</span>}
+                                {current && <span className="ml-2 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-1 text-[10px] font-bold text-slate-700 dark:text-slate-200">This device</span>}
                               </p>
-                              <p className="mt-1 break-all font-mono text-[10px] text-slate-500">Device ID {device.deviceId}</p>
-                              <p className="mt-2 text-xs text-slate-600">
+                              <p className="mt-1 break-all font-mono text-[10px] text-slate-500 dark:text-slate-400">Device ID {device.deviceId}</p>
+                              <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
                                 IP {device.ip} · {device.attemptCount} sign-in attempt(s) · Last outcome: {device.lastAttemptStatus}
                               </p>
                               <p className="mt-1 text-[11px] text-slate-400">
@@ -271,8 +271,8 @@ function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
                                 {device.lastSuccessfulLoginAt && ` · Last successful sign-in ${new Date(device.lastSuccessfulLoginAt).toLocaleString()}`}
                               </p>
                               <details className="mt-2">
-                                <summary className="cursor-pointer text-[11px] font-semibold text-lime-700">Device specifications</summary>
-                                <p className="mt-1 break-all text-[10px] leading-4 text-slate-500">{device.userAgent || 'Browser did not provide a user-agent string.'}</p>
+                                <summary className="cursor-pointer text-[11px] font-semibold text-[#65A30D] dark:text-lime-400">Device specifications</summary>
+                                <p className="mt-1 break-all text-[10px] leading-4 text-slate-500 dark:text-slate-400">{device.userAgent || 'Browser did not provide a user-agent string.'}</p>
                               </details>
                             </div>
                             {canManage && (
@@ -281,7 +281,7 @@ function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
                                   type="button"
                                   disabled={busy}
                                   onClick={() => void changeBlock('device', device.deviceId, blockedDevice)}
-                                  className="rounded-full border border-slate-200 px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                  className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition"
                                 >
                                   {blockedDevice ? 'Unblock device' : 'Block device'}
                                 </button>
@@ -290,7 +290,7 @@ function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
                                   disabled={busy || device.ip === primaryIp}
                                   title={device.ip === primaryIp ? 'The primary device cannot block its current IP.' : undefined}
                                   onClick={() => void changeBlock('ip', device.ip, blockedIp)}
-                                  className="rounded-full border border-slate-200 px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                  className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition"
                                 >
                                   {blockedIp ? 'Unblock IP' : 'Block IP'}
                                 </button>
@@ -305,20 +305,20 @@ function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
               </div>
 
               <div>
-                <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">
+                <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Recent connection attempts ({snapshot.attempts.length})
                 </h3>
                 {snapshot.attempts.length === 0 ? (
-                  <p className="text-xs text-slate-500">No connection attempts recorded.</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">No connection attempts recorded.</p>
                 ) : (
-                  <ol className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                  <ol className="divide-y divide-slate-100 dark:divide-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
                     {snapshot.attempts.map((attempt, index) => (
-                      <li key={`${attempt.createdAt}-${index}`} className="flex flex-wrap justify-between gap-2 px-4 py-3">
+                      <li key={`${attempt.createdAt}-${index}`} className="flex flex-wrap justify-between gap-2 px-4 py-3 bg-white dark:bg-slate-900/60">
                         <div>
-                          <p className="text-xs font-semibold text-slate-800">
+                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
                             {attempt.status} · {attempt.deviceType}, {attempt.operatingSystem}, {attempt.browser}
                           </p>
-                          <p className="mt-1 text-[11px] text-slate-500">
+                          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                             IP {attempt.ip}{attempt.reason ? ` · ${attempt.reason}` : ''}
                           </p>
                         </div>
@@ -333,7 +333,7 @@ function DeviceSecurityPanel({ apiBaseUrl }: { apiBaseUrl: string }) {
               </div>
             </>
           )}
-          {!snapshot && <p className="text-xs text-slate-500">Loading device records…</p>}
+          {!snapshot && <p className="text-xs text-slate-500 dark:text-slate-400">Loading device records…</p>}
         </div>
       )}
     </section>

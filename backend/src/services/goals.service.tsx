@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { COLLECTIONS } from '../db/collections.tsx'
 import { appendAuditEvent } from '../audit/audit-log.tsx'
-import { planGoal } from '../agent/planner.tsx'
+import { planGoal } from '../../llm-planner/src/backend-bridge.ts'
 import { evaluateNativeTransfer, evaluateSwap, readPolicyConfig } from '../guard/policy-engine.tsx'
 import { routeTier } from '../guard/tier-router.tsx'
 import { getLevel } from '../guard/autonomy-manager.tsx'
@@ -165,17 +165,40 @@ async function processSwap(database, intent, summary, policy, requestId) {
   }
 }
 
-async function processGoal(database, goal, requestId, options = {}) {
+async function processGoal(database, goal, requestId, untrusted?: string[]) {
   await appendAuditEvent(database, {
     requestId,
     type: 'goal.received',
-    data: { goalSha256: goalHash(goal), untrustedNotes: Array.isArray(options.untrusted) ? options.untrusted.length : 0 },
+    data: { goalSha256: goalHash(goal), hasUntrusted: Array.isArray(untrusted) && untrusted.length > 0 },
   })
 
   let intent
   try {
-    intent = await planGoal(goal, Number(process.env.CHAIN_ID || 31337), { untrusted: options.untrusted })
+    intent = await planGoal(goal, Number(process.env.CHAIN_ID || 31337), untrusted)
   } catch (error) {
+    const code = error.code || undefined
+    const blockedCodes = [
+      'UNTRUSTED_CONTENT_FLAGGED',
+      'QUARANTINE_FAILED',
+      'INPUT_INVALID',
+      'MODEL_REFUSED',
+      'INVALID_OUTPUT',
+      'UNGROUNDED_RECIPIENT',
+      'UNKNOWN_CONTACT',
+      'PROVIDERS_UNAVAILABLE',
+      'BUDGET_EXCEEDED',
+    ]
+    if (code && blockedCodes.includes(code)) {
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'planner.blocked',
+        data: { code, reason: error.message },
+      })
+      return {
+        statusCode: 200,
+        body: { requestId, status: 'blocked', code, error: error.message || 'Blocked, nothing executed.' },
+      }
+    }
     await appendAuditEvent(database, {
       requestId,
       type: 'planner.failed',
@@ -300,7 +323,7 @@ async function processGoal(database, goal, requestId, options = {}) {
   }
 }
 
-async function submitGoal(database, goal, idempotencyKey, options = {}) {
+async function submitGoal(database, goal, idempotencyKey, untrusted?: string[]) {
   const goals = database.collection(COLLECTIONS.goals)
   const requestId = randomUUID()
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
@@ -323,7 +346,7 @@ async function submitGoal(database, goal, idempotencyKey, options = {}) {
   }
 
   try {
-    const result = await processGoal(database, goal, requestId, options)
+    const result = await processGoal(database, goal, requestId, untrusted)
     await goals.updateOne(
       { idempotencyKey },
       { $set: { status: 'complete', statusCode: result.statusCode, body: result.body } },

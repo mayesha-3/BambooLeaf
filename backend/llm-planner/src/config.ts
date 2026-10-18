@@ -1,6 +1,8 @@
 // Config parsing. Everything comes from environment variables; nothing is hardcoded.
 // Bad config throws ConfigError at startup (fail closed).
 
+import { getAddress, isAddress } from 'ethers'
+
 export class ConfigError extends Error {}
 
 export interface ProviderConfig {
@@ -28,6 +30,8 @@ export interface PlannerConfig {
   /** Chain id of the selected network; stamped on every intent by trusted code. */
   chainId: number
   defaultSlippageBps: number
+  /** Saved contacts (name -> checksummed address). Only the NAMES are ever sent to a model. */
+  addressBook: Record<string, string>
   timeoutMs: number
   maxOutputTokens: number
   totalTokenBudget: number
@@ -78,6 +82,39 @@ export function parseChain(raw: string | undefined, label: string, providers: Re
     if (!providers[provider]) throw new ConfigError(`${label} refers to unknown provider "${provider}"`)
     return { provider, model }
   })
+}
+
+const CONTACT_NAME = /^[\p{L}\p{N} ._-]{1,50}$/u
+const MAX_CONTACTS = 50
+
+/** PLANNER_ADDRESS_BOOK: JSON object of contact name -> public address. Checksum is enforced; anything wrong fails startup. */
+export function parseAddressBook(raw: string | undefined): Record<string, string> {
+  if (raw === undefined || raw.trim() === '') return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new ConfigError('PLANNER_ADDRESS_BOOK must be a JSON object of contact name to address')
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ConfigError('PLANNER_ADDRESS_BOOK must be a JSON object of contact name to address')
+  }
+  const entries = Object.entries(parsed as Record<string, unknown>)
+  if (entries.length > MAX_CONTACTS) throw new ConfigError(`PLANNER_ADDRESS_BOOK has more than ${MAX_CONTACTS} contacts`)
+  const book: Record<string, string> = {}
+  const seen = new Set<string>()
+  for (const [name, value] of entries) {
+    if (!CONTACT_NAME.test(name) || name.trim() !== name) {
+      throw new ConfigError('PLANNER_ADDRESS_BOOK has an invalid contact name (1-50 letters, digits, space, dot, dash or underscore; no leading or trailing space)')
+    }
+    if (seen.has(name.toLowerCase())) throw new ConfigError(`PLANNER_ADDRESS_BOOK lists "${name}" twice (names are case-insensitive)`)
+    seen.add(name.toLowerCase())
+    if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value) || !isAddress(value) || /^0x0{40}$/.test(value)) {
+      throw new ConfigError(`PLANNER_ADDRESS_BOOK entry "${name}" must be a valid, checksum-correct, non-zero address`)
+    }
+    book[name] = getAddress(value)
+  }
+  return book
 }
 
 export interface LoadOptions {
@@ -147,6 +184,7 @@ export function loadConfig(env: Env, options: LoadOptions = {}): PlannerConfig {
     chainIds,
     chainId: chainIds[network],
     defaultSlippageBps: parseInt10(env.PLANNER_DEFAULT_SLIPPAGE_BPS, 50, 'PLANNER_DEFAULT_SLIPPAGE_BPS', 1, 10000),
+    addressBook: parseAddressBook(env.PLANNER_ADDRESS_BOOK),
     timeoutMs: parseInt10(env.LLM_TIMEOUT_MS, 20000, 'LLM_TIMEOUT_MS', 100, 300000),
     maxOutputTokens: parseInt10(env.LLM_MAX_OUTPUT_TOKENS, 600, 'LLM_MAX_OUTPUT_TOKENS', 16, 8192),
     totalTokenBudget: parseInt10(env.LLM_TOTAL_TOKEN_BUDGET, 200000, 'LLM_TOTAL_TOKEN_BUDGET', 1, 100_000_000),

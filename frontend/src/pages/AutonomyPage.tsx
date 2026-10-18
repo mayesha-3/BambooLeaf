@@ -40,27 +40,27 @@ export default function AutonomyPage() {
             </button>
           </div>
         </div>
-        <div className="grid gap-0 divide-y divide-slate-100 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        <div className="grid gap-0 divide-y divide-slate-100 dark:divide-slate-800 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           <div className="p-6">
             <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Clean streak</p>
-            <p className="mt-2 text-2xl font-extrabold text-slate-900">7 <span className="text-xs font-normal text-slate-400">/ 10 to promotion</span></p>
+            <p className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">7 <span className="text-xs font-normal text-slate-400">/ 10 to promotion</span></p>
           </div>
           <div className="p-6">
             <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Blocked attempts</p>
-            <p className="mt-2 text-2xl font-extrabold text-slate-900">1 <span className="text-xs font-normal text-slate-400">in current window</span></p>
+            <p className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">1 <span className="text-xs font-normal text-slate-400">in current window</span></p>
           </div>
           <div className="p-6">
             <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Human-set ceiling</p>
-            <p className="mt-2 text-2xl font-extrabold text-slate-900">L3 <span className="text-xs font-normal text-slate-400">never exceeded</span></p>
+            <p className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white">L3 <span className="text-xs font-normal text-slate-400">never exceeded</span></p>
           </div>
         </div>
       </Card>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Card className="p-6">
-          <h2 className="text-base font-bold text-slate-900 mb-1">Permission levels</h2>
+          <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Permission levels</h2>
           <p className="text-xs text-slate-400 mb-4">Increasing permissions are earned—not requested from the model</p>
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
             {[
               { level: 'L0', name: 'Read-only', desc: 'Balances, quotes, explanations. Never signs.' },
               { level: 'L1', name: 'Restricted', desc: 'Every action waits for owner approval.' },
@@ -68,11 +68,11 @@ export default function AutonomyPage() {
               { level: 'L3', name: 'Trusted', desc: 'Wider limits, still bounded by owner policy.' },
             ].map((item) => (
               <div key={item.level} className="flex gap-3 py-3.5">
-                <span className="grid h-8 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-[11px] font-bold text-slate-700">
+                <span className="grid h-8 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] font-bold text-slate-700 dark:text-slate-300">
                   {item.level}
                 </span>
                 <div>
-                  <p className="text-xs font-bold text-slate-800">{item.name}</p>
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{item.name}</p>
                   <p className="mt-0.5 text-[11px] text-slate-400">{item.desc}</p>
                 </div>
               </div>
@@ -81,7 +81,7 @@ export default function AutonomyPage() {
         </Card>
 
         <Card className="p-6">
-          <h2 className="text-base font-bold text-slate-900 mb-1">Demotion triggers</h2>
+          <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Demotion triggers</h2>
           <p className="text-xs text-slate-400 mb-4">Suspicious signals reduce permissions automatically</p>
           <div className="space-y-3">
             {[
@@ -89,13 +89,13 @@ export default function AutonomyPage() {
               { title: 'Repeated blocked attempts', desc: '3 blocked actions inside a 10-minute window', level: 'Demote to L0' },
               { title: 'Kill switch activated', desc: 'Owner pauses all agent signing', level: 'Immediate L0' },
             ].map((item) => (
-              <div key={item.title} className="flex items-start gap-3 rounded-2xl border border-slate-100 p-3.5">
-                <Icon name="shield" size={15} className="mt-0.5 text-rose-600" />
+              <div key={item.title} className="flex items-start gap-3 rounded-2xl border border-slate-100 dark:border-slate-800 p-3.5">
+                <Icon name="shield" size={15} className="mt-0.5 text-rose-600 dark:text-rose-400" />
                 <div className="flex-1">
-                  <p className="text-xs font-bold text-slate-800">{item.title}</p>
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{item.title}</p>
                   <p className="mt-0.5 text-[11px] text-slate-400">{item.desc}</p>
                 </div>
-                <span className="text-[10px] font-bold text-rose-700">{item.level}</span>
+                <span className="text-[10px] font-bold text-rose-700 dark:text-rose-400">{item.level}</span>
               </div>
             ))}
           </div>

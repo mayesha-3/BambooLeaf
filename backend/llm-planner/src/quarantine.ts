@@ -5,6 +5,7 @@ import { describeIssues } from './schema.ts'
 import { extractJson } from './json.ts'
 import type { ChatFn, ChatMessage } from './provider.ts'
 import { describeGoal, silentLogger, type Logger } from './logger.ts'
+import { failed } from './result.ts'
 
 // Quarantined inspector: the ONLY place untrusted text is read. It has no tools and no authority, and returns
 // a tiny validated object. Detection is probabilistic: treat isLikelyInjection as a signal, not the boundary.
@@ -84,13 +85,13 @@ export async function inspect(untrusted: unknown, deps: InspectDeps): Promise<Qu
   }
 
   const checked = cleanUntrusted(untrusted)
-  if (!checked.ok) return fail('INPUT_INVALID', checked.message)
+  if (failed(checked)) return fail('INPUT_INVALID', checked.message)
   if (!deps.chat) return fail('QUARANTINE_FAILED', 'No quarantine provider is configured', 'NOT_CONFIGURED')
 
   const messages = buildQuarantineMessages(checked.items)
   for (let attempt = 0; attempt <= MAX_QUARANTINE_RETRIES; attempt++) {
     const res = await deps.chat(messages)
-    if (!res.ok) return fail('QUARANTINE_FAILED', res.code === 'BUDGET_EXCEEDED' ? 'Token budget reached' : 'All quarantine providers failed', res.code)
+    if (failed(res)) return fail('QUARANTINE_FAILED', res.code === 'BUDGET_EXCEEDED' ? 'Token budget reached' : 'All quarantine providers failed', res.code)
     stats.calls++
     stats.promptTokens += res.usage.promptTokens
     stats.completionTokens += res.usage.completionTokens

@@ -8,6 +8,7 @@ import type { AddressBook, FailureCode, PlanResult, PlanStats, UntrustedSignal }
 import { describeGoal, silentLogger, type Logger } from './logger.ts'
 import { extractJson } from './json.ts'
 import { inspect, buildUntrustedBlock } from './quarantine.ts'
+import { failed } from './result.ts'
 
 const PROMPT_TEMPLATE = readFileSync(fileURLToPath(new URL('./prompts/planner.prompt.txt', import.meta.url)), 'utf8')
 
@@ -66,7 +67,7 @@ export async function planGoal(goal: string, deps: PlannerDeps): Promise<PlanRes
     stats.completionTokens += q.stats.completionTokens
     stats.totalTokens += q.stats.totalTokens
     stats.latencyMs += q.stats.latencyMs
-    if (!q.ok) return fail(q.code, q.message, { cause: q.cause })
+    if (failed(q)) return fail(q.code, q.message, { cause: q.cause })
     if (q.result.isLikelyInjection) {
       return fail('UNTRUSTED_CONTENT_FLAGGED', 'Untrusted content looks like an injection attempt; the planner was not called', {
         signal: { kind: 'injection_suspected', source: 'untrusted_text', itemCount: q.itemCount },
@@ -84,7 +85,7 @@ export async function planGoal(goal: string, deps: PlannerDeps): Promise<PlanRes
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const res = await deps.chat(messages)
-    if (!res.ok) return fail(res.code, res.code === 'BUDGET_EXCEEDED' ? 'Token budget reached' : 'All providers failed')
+    if (failed(res)) return fail(res.code, res.code === 'BUDGET_EXCEEDED' ? 'Token budget reached' : 'All providers failed')
     stats.modelCalls++
     stats.latencyMs += res.latencyMs // the provider call itself, not rate-limit waiting
     stats.promptTokens += res.usage.promptTokens
