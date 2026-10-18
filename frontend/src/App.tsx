@@ -14,8 +14,10 @@ import ArenaPage from './pages/ArenaPage'
 import SettingsPage from './pages/SettingsPage'
 import ChatPage from './features/chat/ChatPage'
 import ComplianceConsole from './pages/ComplianceConsole'
+import PaymentsPage from './pages/PaymentsPage'
 import ProfileDropdown from './components/ProfileDropdown'
 import LiveMarketTicker from './features/market/LiveMarketTicker'
+import { authenticatedFetch } from './lib/device-session'
 
 
 const navGroups: { label: string; items: { id: Page; label: string; icon: IconName; count?: string; isChat?: boolean }[] }[] = [
@@ -43,7 +45,10 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: IconNa
   },
   {
     label: 'COMPLIANCE',
-    items: [{ id: 'compliance', label: 'Compliance Console', icon: 'layers' }],
+    items: [
+      { id: 'compliance', label: 'Compliance Console', icon: 'layers' },
+      { id: 'payments', label: 'Supplier payments', icon: 'wallet' },
+    ],
   },
   {
     label: 'PLAYGROUND',
@@ -191,8 +196,8 @@ export function App() {
     }
     try {
       const [eventsResponse, verifyResponse] = await Promise.all([
-        fetch(`${apiBaseUrl}/audit?limit=50`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${apiBaseUrl}/audit/verify`, { headers: { Authorization: `Bearer ${token}` } }),
+        authenticatedFetch(`${apiBaseUrl}/audit?limit=50`),
+        authenticatedFetch(`${apiBaseUrl}/audit/verify`),
       ])
       const eventPayload = (await eventsResponse.json()) as { entries?: AuditEntry[]; error?: string }
       const verifyPayload = (await verifyResponse.json()) as { valid?: boolean; checked?: number; error?: string }
@@ -593,6 +598,7 @@ export function App() {
               {page === 'wallet' && <WalletPage userProfile={userProfile} onNavigate={navigate} />}
               {page === 'arena' && <ArenaPage />}
               {page === 'compliance' && <ComplianceConsole />}
+              {page === 'payments' && <PaymentsPage />}
               {page === 'settings' && (
                 <SettingsPage
                   userProfile={userProfile}

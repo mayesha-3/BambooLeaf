@@ -3,6 +3,7 @@ import Card from '../components/ui/Card'
 import Icon from '../components/ui/Icon'
 import PageHeading from '../components/ui/PageHeading'
 import { apiBaseUrl } from '../config/api'
+import { authenticatedFetch, enrollOrLoginDevice } from '../lib/device-session'
 
 type AuditEntry = {
   seq: number
@@ -72,10 +73,10 @@ export default function ComplianceConsole() {
       const query = filterQuery(filters, 100, before)
       const headers = requestHeaders(sessionToken)
       const [accessResponse, auditResponse, autonomyResponse, policyResponse] = await Promise.all([
-        fetch(`${apiBaseUrl}/audit/access`, { headers }),
-        fetch(`${apiBaseUrl}/audit?${query}`, { headers }),
-        fetch(`${apiBaseUrl}/audit/autonomy-history`, { headers }),
-        fetch(`${apiBaseUrl}/audit/policy-history`, { headers }),
+        authenticatedFetch(`${apiBaseUrl}/audit/access`, { headers }),
+        authenticatedFetch(`${apiBaseUrl}/audit?${query}`, { headers }),
+        authenticatedFetch(`${apiBaseUrl}/audit/autonomy-history`, { headers }),
+        authenticatedFetch(`${apiBaseUrl}/audit/policy-history`, { headers }),
       ])
       const [access, audit, autonomyHistory, policyHistory] = await Promise.all([
         accessResponse.json(),
@@ -102,10 +103,10 @@ export default function ComplianceConsole() {
         }
         throw new Error(payload.error || `Compliance API returned ${response.status}`)
       }
-      if (access.role !== 'auditor' && access.role !== 'owner') {
+      if (!['admin', 'approver', 'auditor'].includes(access.role || '')) {
         throw new Error('The signed-in wallet does not have auditor or owner read access.')
       }
-      setRole(access.role)
+      setRole(access.role || '')
       setEntries((current) => append ? [...current, ...(audit.entries || [])] : audit.entries || [])
       setNextBeforeSeq(audit.nextBeforeSeq ?? null)
       setAutonomy(autonomyHistory.entries || [])
@@ -128,40 +129,11 @@ export default function ComplianceConsole() {
     try {
       const wallet = (window as Window & { ethereum?: InjectedWallet }).ethereum
       if (!wallet) throw new Error('No browser wallet was found.')
-      const accounts = await wallet.request({ method: 'eth_requestAccounts' })
-      const walletAddress = Array.isArray(accounts) ? accounts[0] : undefined
-      if (typeof walletAddress !== 'string') throw new Error('Wallet did not return an account.')
-      let deviceId = window.localStorage.getItem('bambooleaf-device-id')
-      if (!deviceId) {
-        deviceId = window.crypto.randomUUID()
-        window.localStorage.setItem('bambooleaf-device-id', deviceId)
+      const result = await enrollOrLoginDevice(wallet)
+      if (result.status === 'pending' || !result.token) {
+        throw new Error('This device is pending admin approval. Sign in after it is approved.')
       }
-
-      const challengeResponse = await fetch(`${apiBaseUrl}/devices/challenge`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, deviceId }),
-      })
-      const challenge = await challengeResponse.json() as { message?: string; nonce?: string; error?: string }
-      if (!challengeResponse.ok || !challenge.message || !challenge.nonce) {
-        throw new Error(challenge.error || `Wallet challenge failed (${challengeResponse.status})`)
-      }
-      const signature = await wallet.request({
-        method: 'personal_sign',
-        params: [challenge.message, walletAddress],
-      })
-      if (typeof signature !== 'string') throw new Error('Wallet signature was invalid.')
-      const loginResponse = await fetch(`${apiBaseUrl}/devices/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, deviceId, nonce: challenge.nonce, signature }),
-      })
-      const login = await loginResponse.json() as { token?: string; error?: string }
-      if (!loginResponse.ok || !login.token) {
-        throw new Error(login.error || `Wallet sign-in failed (${loginResponse.status})`)
-      }
-      window.sessionStorage.setItem('bambooleaf-device-session', login.token)
-      setToken(login.token)
+      setToken(result.token)
     } catch (connectError) {
       setError(connectError instanceof Error ? connectError.message : 'Wallet sign-in failed.')
       setLoading(false)
@@ -173,7 +145,7 @@ export default function ComplianceConsole() {
     setVerifying(true)
     setError('')
     try {
-      const response = await fetch(`${apiBaseUrl}/audit/verify`, { headers: requestHeaders(token) })
+      const response = await authenticatedFetch(`${apiBaseUrl}/audit/verify`, { headers: requestHeaders(token) })
       const result = await response.json() as { valid?: boolean; checked?: number; firstInvalidSeq?: number; error?: string }
       if (!response.ok && response.status !== 409) throw new Error(result.error || `Verification failed (${response.status})`)
       setChainResult({
@@ -192,7 +164,7 @@ export default function ComplianceConsole() {
     if (!token) return
     setError('')
     try {
-      const response = await fetch(`${apiBaseUrl}/audit/export?${filterQuery(filters, 1000)}` +
+      const response = await authenticatedFetch(`${apiBaseUrl}/audit/export?${filterQuery(filters, 1000)}` +
         `&format=${format}`, { headers: requestHeaders(token) })
       if (!response.ok) {
         const result = await response.json() as { error?: string }

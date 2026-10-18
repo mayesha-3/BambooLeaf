@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { authenticatedFetch, enrollOrLoginDevice } from '../../lib/device-session'
 
 type DeviceRecord = {
   deviceId: string
+  walletAddress: string
+  status: string
+  observedIps?: string[]
   ip: string
   browser: string
   operatingSystem: string
@@ -26,8 +30,18 @@ type DeviceAttempt = {
 }
 
 type DeviceBlock = { type: 'device' | 'ip'; target: string }
+type TrustedIp = { ip: string }
+type RoleAccount = {
+  walletAddress: string
+  role: 'admin' | 'approver' | 'clerk' | 'auditor' | null
+  source: string
+  deviceCount: number
+  lastSeenAt: string | null
+  updatedAt?: string
+}
 type DeviceSnapshot = {
   walletAddress: string
+  role: string
   primaryDeviceId: string
   currentDeviceId: string
   devices: DeviceRecord[]
@@ -42,24 +56,36 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
   const [deviceId, setDeviceId] = useState('')
   const [token, setToken] = useState('')
   const [snapshot, setSnapshot] = useState<DeviceSnapshot | null>(null)
+  const [roleAccounts, setRoleAccounts] = useState<RoleAccount[]>([])
+  const [roleSelections, setRoleSelections] = useState<Record<string, string>>({})
+  const [trustedIpAddresses, setTrustedIpAddresses] = useState<string[]>([])
+  const [newWalletAddress, setNewWalletAddress] = useState('')
+  const [newWalletRole, setNewWalletRole] = useState('clerk')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
+    let active = true
     try {
       const storedToken = window.sessionStorage.getItem('bambooleaf-device-session')
       const storedDeviceId = window.localStorage.getItem('bambooleaf-device-id')
       const currentDeviceId = storedDeviceId || window.crypto.randomUUID()
       if (!storedDeviceId) window.localStorage.setItem('bambooleaf-device-id', currentDeviceId)
-      setToken(storedToken || '')
-      setDeviceId(currentDeviceId)
+      void Promise.resolve().then(() => {
+        if (!active) return
+        setToken(storedToken || '')
+        setDeviceId(currentDeviceId)
+      })
     } catch {
-      setError('Browser storage is unavailable; device security cannot identify this browser.')
+      void Promise.resolve().then(() => {
+        if (active) setError('Browser storage is unavailable; device security cannot identify this browser.')
+      })
     }
+    return () => { active = false }
   }, [])
 
   const loadDevices = useCallback(async (sessionToken: string) => {
-    const response = await fetch(`${apiBaseUrl}/devices`, {
+    const response = await authenticatedFetch(`${apiBaseUrl}/devices`, {
       headers: { Authorization: `Bearer ${sessionToken}` },
     })
     const payload = await response.json() as DeviceSnapshot & { error?: string }
@@ -71,15 +97,32 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
       throw new Error(payload.error || `Device request failed (${response.status})`)
     }
     setSnapshot(payload)
+    if (payload.role === 'admin') {
+      const rolesResponse = await authenticatedFetch(`${apiBaseUrl}/roles`)
+      const rolesPayload = await rolesResponse.json() as { accounts?: RoleAccount[]; error?: string }
+      if (!rolesResponse.ok) throw new Error(rolesPayload.error || `Role list request failed (${rolesResponse.status})`)
+      const trustedResponse = await authenticatedFetch(`${apiBaseUrl}/security/trusted-ips`)
+      const trustedPayload = await trustedResponse.json() as { trustedIps?: TrustedIp[]; error?: string }
+      if (!trustedResponse.ok) throw new Error(trustedPayload.error || `Trusted IP request failed (${trustedResponse.status})`)
+      const accounts = rolesPayload.accounts || []
+      setRoleAccounts(accounts)
+      setTrustedIpAddresses((trustedPayload.trustedIps || []).map((item) => item.ip))
+      setRoleSelections(Object.fromEntries(accounts.map((account) => [
+        account.walletAddress,
+        account.role || '',
+      ])))
+    } else {
+      setRoleAccounts([])
+      setRoleSelections({})
+      setTrustedIpAddresses([])
+    }
     setError('')
   }, [apiBaseUrl])
 
   useEffect(() => {
-    if (!token) {
-      setSnapshot(null)
-      return
-    }
-    void loadDevices(token).catch((loadError: unknown) => {
+    if (!token) return
+    const request = Promise.resolve().then(() => loadDevices(token))
+    void request.catch((loadError: unknown) => {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load device activity.')
     })
   }, [loadDevices, token])
@@ -88,50 +131,15 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
     setBusy(true)
     setError('')
     try {
-      if (!deviceId) throw new Error('This browser could not create a device identifier.')
       const wallet = (window as Window & { ethereum?: InjectedWallet }).ethereum
       if (!wallet) throw new Error('No browser wallet was found. Install or unlock a wallet extension and try again.')
-      const accounts = await wallet.request({ method: 'eth_requestAccounts' })
-      const walletAddress = Array.isArray(accounts) ? accounts[0] : undefined
-      if (typeof walletAddress !== 'string') throw new Error('Your wallet did not provide an account.')
-
-      const challengeResponse = await fetch(`${apiBaseUrl}/devices/challenge`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, deviceId }),
-      })
-      const challenge = await challengeResponse.json() as { message?: string; nonce?: string; error?: string }
-      if (!challengeResponse.ok || !challenge.message || !challenge.nonce) {
-        throw new Error(challenge.error || `Wallet challenge failed (${challengeResponse.status})`)
+      const result = await enrollOrLoginDevice(wallet)
+      setDeviceId(result.deviceId)
+      if (result.status === 'pending') {
+        setError('This device key is registered and pending admin approval. Sign in after an admin approves it.')
+        return
       }
-
-      let signature: unknown
-      try {
-        signature = await wallet.request({
-          method: 'personal_sign',
-          params: [challenge.message, walletAddress],
-        })
-      } catch (signError) {
-        await fetch(`${apiBaseUrl}/devices/challenge/cancel`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ walletAddress, deviceId, nonce: challenge.nonce }),
-        })
-        throw signError
-      }
-      if (typeof signature !== 'string') throw new Error('Your wallet returned an invalid signature.')
-
-      const loginResponse = await fetch(`${apiBaseUrl}/devices/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress, deviceId, nonce: challenge.nonce, signature }),
-      })
-      const login = await loginResponse.json() as { token?: string; error?: string }
-      if (!loginResponse.ok || !login.token) {
-        throw new Error(login.error || `Wallet sign-in failed (${loginResponse.status})`)
-      }
-      window.sessionStorage.setItem('bambooleaf-device-session', login.token)
-      setToken(login.token)
+      setToken(result.token || '')
       onAuthenticated?.()
     } catch (connectError) {
       setError(connectError instanceof Error ? connectError.message : 'Wallet sign-in failed.')
@@ -145,7 +153,7 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
     setBusy(true)
     setError('')
     try {
-      const response = await fetch(`${apiBaseUrl}/devices/blocks`, {
+      const response = await authenticatedFetch(`${apiBaseUrl}/devices/blocks`, {
         method: blocked ? 'DELETE' : 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -163,11 +171,78 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
     }
   }
 
+  void changeBlock
+
+  const reviewDevice = async (device: DeviceRecord, action: 'approve' | 'revoke') => {
+    if (!token) return
+    setBusy(true)
+    setError('')
+    try {
+      const response = await authenticatedFetch(`${apiBaseUrl}/devices/${action}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress: device.walletAddress, deviceId: device.deviceId }),
+      })
+      const payload = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(payload.error || `Device ${action} failed (${response.status})`)
+      await loadDevices(token)
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : `Unable to ${action} device.`)
+    } finally {
+      setBusy(false)
+    }
+
+  }
+
+  const saveAccountRole = async (walletAddress: string, role: string) => {
+    if (!token) return
+    setBusy(true)
+    setError('')
+    try {
+      const response = await authenticatedFetch(`${apiBaseUrl}/roles`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress, role: role || null }),
+      })
+      const payload = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(payload.error || `Role update failed (${response.status})`)
+      await loadDevices(token)
+    } catch (roleError) {
+      setError(roleError instanceof Error ? roleError.message : 'Unable to update account role.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const addWalletRole = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    await saveAccountRole(newWalletAddress.trim(), newWalletRole)
+    setNewWalletAddress('')
+  }
+
+  const trustLoginIp = async (ip: string) => {
+    setBusy(true)
+    setError('')
+    try {
+      const response = await authenticatedFetch(`${apiBaseUrl}/security/trusted-ips`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip }),
+      })
+      const payload = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(payload.error || `Could not trust IP (${response.status})`)
+      await loadDevices(token)
+    } catch (trustError) {
+      setError(trustError instanceof Error ? trustError.message : 'Unable to trust this IP address.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const signOut = async () => {
     if (!token) return
     setBusy(true)
     try {
-      const response = await fetch(`${apiBaseUrl}/devices/session`, {
+      const response = await authenticatedFetch(`${apiBaseUrl}/devices/session`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -182,18 +257,16 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
     }
   }
 
-  const primaryIp = snapshot?.devices.find((device) => device.deviceId === snapshot.currentDeviceId)?.ip
-  const isPrimary = snapshot !== null && snapshot.primaryDeviceId === snapshot.currentDeviceId
-  const isBlocked = (type: DeviceBlock['type'], target: string) =>
-    snapshot?.blocks.some((block) => block.type === type && block.target === target) ?? false
-
   return (
     <section className="mt-6 overflow-hidden rounded-3xl border border-slate-100/90 dark:border-slate-800/80 bg-white dark:bg-[#0f172a] shadow-sm text-slate-900 dark:text-slate-100 transition-colors duration-200" aria-labelledby="device-security-heading">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800/80 px-6 py-5">
         <div>
           <h2 id="device-security-heading" className="text-sm font-bold text-slate-900 dark:text-white">Devices & sign-in attempts</h2>
           <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500 dark:text-slate-400">
-            Wallet signatures verify ownership. We record IP address, browser, operating system, device type, and sign-in outcomes. Websites cannot read a device’s MAC address or reliably determine its location.
+            A non-extractable browser key and wallet signature prove device enrollment. Browser, OS, and observed IP are descriptive only—not proof of identity.
+          </p>
+          <p className="mt-1 max-w-3xl text-[11px] leading-5 text-slate-400">
+            If IP shows 127.0.0.1 or ::1, the app is seeing local loopback (common when the backend runs on this computer), not your public IP. Behind a reverse proxy, configure TRUST_PROXY_HOPS to match only your trusted proxy chain.
           </p>
         </div>
         {token ? (
@@ -225,7 +298,7 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
 
       {!token ? (
         <p className="px-6 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
-          Connect and sign with your wallet to view all recorded devices and manage access. The first wallet-verified device becomes primary.
+          Enroll this browser key with your wallet. New devices remain pending until an admin approves them.
         </p>
       ) : (
         <div className="space-y-6 p-6">
@@ -235,10 +308,82 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
                 <p className="text-xs text-slate-600 dark:text-slate-400">
                   Wallet <span className="font-mono text-slate-900 dark:text-white">{snapshot.walletAddress}</span>
                 </p>
-                <p className={`text-xs font-bold ${isPrimary ? 'text-[#65A30D] dark:text-lime-400' : 'text-slate-500 dark:text-slate-400'}`}>
-                  {isPrimary ? 'This is the primary device' : 'Only the primary device can manage blocks'}
+                <p className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                  {snapshot.role === 'admin' ? 'Admin device registry' : `Signed in as ${snapshot.role}`}
                 </p>
               </div>
+
+              {snapshot.role === 'admin' && (
+                <div className="rounded-2xl border border-lime-200 bg-lime-50/50 p-4 dark:border-lime-900/50 dark:bg-lime-950/20">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">Accounts & role assignments</h3>
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    Wallets that enroll appear here automatically. You can also add a friend’s wallet before they enroll. The configured owner account is protected and cannot be reassigned.
+                  </p>
+                  <form onSubmit={(event) => void addWalletRole(event)} className="mt-3 flex flex-wrap gap-2">
+                    <input
+                      required
+                      aria-label="Wallet address to add"
+                      value={newWalletAddress}
+                      onChange={(event) => setNewWalletAddress(event.target.value)}
+                      placeholder="Friend’s wallet address"
+                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-900"
+                    />
+                    <select
+                      aria-label="Role for new wallet"
+                      value={newWalletRole}
+                      onChange={(event) => setNewWalletRole(event.target.value)}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900"
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="approver">Approver</option>
+                      <option value="clerk">Clerk</option>
+                      <option value="auditor">Auditor</option>
+                    </select>
+                    <button type="submit" disabled={busy} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white disabled:opacity-50 dark:bg-lime-400 dark:text-slate-950">
+                      Add wallet
+                    </button>
+                  </form>
+                  <div className="mt-3 space-y-2">
+                    {roleAccounts.map((account) => (
+                      <div key={account.walletAddress} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-900/70">
+                        <div className="min-w-[220px] flex-1">
+                          <p className="break-all font-mono text-[11px] text-slate-700 dark:text-slate-200">{account.walletAddress}</p>
+                          <p className="mt-1 text-[10px] text-slate-400">
+                            {account.deviceCount} enrolled device(s)
+                            {account.lastSeenAt ? ` · last seen ${new Date(account.lastSeenAt).toLocaleString()}` : ' · not enrolled yet'}
+                            {account.source === 'owner' ? ' · owner account' : ''}
+                          </p>
+                        </div>
+                        <select
+                          aria-label={`Role for ${account.walletAddress}`}
+                          disabled={busy || account.source === 'owner'}
+                          value={roleSelections[account.walletAddress] ?? ''}
+                          onChange={(event) => setRoleSelections((current) => ({
+                            ...current,
+                            [account.walletAddress]: event.target.value,
+                          }))}
+                          className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900"
+                        >
+                          <option value="">No access</option>
+                          <option value="admin">Admin</option>
+                          <option value="approver">Approver</option>
+                          <option value="clerk">Clerk</option>
+                          <option value="auditor">Auditor</option>
+                        </select>
+                        <button
+                          type="button"
+                          disabled={busy || account.source === 'owner'}
+                          onClick={() => void saveAccountRole(account.walletAddress, roleSelections[account.walletAddress] ?? '')}
+                          className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold disabled:opacity-50 dark:border-slate-700"
+                        >
+                          Save role
+                        </button>
+                      </div>
+                    ))}
+                    {!roleAccounts.length && <p className="text-xs text-slate-500">No wallets discovered yet. Add a wallet above to pre-assign access.</p>}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -250,51 +395,34 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
                   <div className="space-y-3">
                     {snapshot.devices.map((device) => {
                       const current = device.deviceId === snapshot.currentDeviceId
-                      const primary = device.deviceId === snapshot.primaryDeviceId
-                      const blockedDevice = isBlocked('device', device.deviceId)
-                      const blockedIp = isBlocked('ip', device.ip)
-                      const canManage = isPrimary && !current
+                      const canManage = snapshot.role === 'admin'
                       return (
                         <div key={device.deviceId} className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 bg-slate-50/50 dark:bg-slate-900/40">
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                               <p className="text-sm font-semibold text-slate-900 dark:text-white">
                                 {device.deviceType} · {device.operatingSystem} · {device.browser}
-                                {primary && <span className="ml-2 rounded-full bg-lime-50 dark:bg-lime-950/50 px-2 py-1 text-[10px] font-bold text-lime-800 dark:text-lime-300">Primary</span>}
+                                <span className={`ml-2 rounded-full px-2 py-1 text-[10px] font-bold ${device.status === 'approved' ? 'bg-lime-50 text-lime-800 dark:bg-lime-950/50 dark:text-lime-300' : device.status === 'revoked' ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'}`}>{device.status || 'pending'}</span>
                                 {current && <span className="ml-2 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-1 text-[10px] font-bold text-slate-700 dark:text-slate-200">This device</span>}
                               </p>
                               <p className="mt-1 break-all font-mono text-[10px] text-slate-500 dark:text-slate-400">Device ID {device.deviceId}</p>
                               <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
-                                IP {device.ip} · {device.attemptCount} sign-in attempt(s) · Last outcome: {device.lastAttemptStatus}
+                                Wallet {device.walletAddress} · observed IP {device.ip} · {device.attemptCount} sign-in attempt(s)
                               </p>
                               <p className="mt-1 text-[11px] text-slate-400">
                                 First seen {new Date(device.firstSeenAt).toLocaleString()} · Last seen {new Date(device.lastSeenAt).toLocaleString()}
                                 {device.lastSuccessfulLoginAt && ` · Last successful sign-in ${new Date(device.lastSuccessfulLoginAt).toLocaleString()}`}
                               </p>
+                              <p className="mt-1 text-[10px] text-slate-400">Browser and OS are inferred from the client-provided user-agent string; they may differ and are not verified hardware identity.</p>
                               <details className="mt-2">
                                 <summary className="cursor-pointer text-[11px] font-semibold text-[#65A30D] dark:text-lime-400">Device specifications</summary>
-                                <p className="mt-1 break-all text-[10px] leading-4 text-slate-500 dark:text-slate-400">{device.userAgent || 'Browser did not provide a user-agent string.'}</p>
+                                <p className="mt-1 break-all text-[10px] leading-4 text-slate-500 dark:text-slate-400">{device.userAgent || 'Browser did not provide a user-agent string.'} · Observed IPs: {(device.observedIps || []).join(', ') || device.ip || 'not recorded'}. These are descriptive, not security proof.</p>
                               </details>
                             </div>
                             {canManage && (
                               <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => void changeBlock('device', device.deviceId, blockedDevice)}
-                                  className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition"
-                                >
-                                  {blockedDevice ? 'Unblock device' : 'Block device'}
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={busy || device.ip === primaryIp}
-                                  title={device.ip === primaryIp ? 'The primary device cannot block its current IP.' : undefined}
-                                  onClick={() => void changeBlock('ip', device.ip, blockedIp)}
-                                  className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition"
-                                >
-                                  {blockedIp ? 'Unblock IP' : 'Block IP'}
-                                </button>
+                                {device.status === 'pending' && <button type="button" disabled={busy} onClick={() => void reviewDevice(device, 'approve')} className="rounded-full bg-lime-600 px-3 py-1.5 text-[11px] font-bold text-white disabled:opacity-50">Approve device</button>}
+                                {device.status !== 'revoked' && <button type="button" disabled={busy} onClick={() => void reviewDevice(device, 'revoke')} className="rounded-full border border-rose-300 px-3 py-1.5 text-[11px] font-bold text-rose-700 disabled:opacity-50">Revoke now</button>}
                               </div>
                             )}
                           </div>
@@ -322,6 +450,16 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
                           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                             IP {attempt.ip}{attempt.reason ? ` · ${attempt.reason}` : ''}
                           </p>
+                          {snapshot.role === 'admin' && attempt.ip !== 'unknown' && (
+                            <button
+                              type="button"
+                              disabled={busy || trustedIpAddresses.includes(attempt.ip)}
+                              onClick={() => void trustLoginIp(attempt.ip)}
+                              className="mt-2 rounded-lg border border-lime-300 px-2.5 py-1 text-[10px] font-bold text-lime-800 disabled:opacity-50 dark:text-lime-300"
+                            >
+                              {trustedIpAddresses.includes(attempt.ip) ? 'IP trusted · manage in Settings' : 'Trust this IP in Settings'}
+                            </button>
+                          )}
                         </div>
                         <time className="text-[10px] text-slate-400" dateTime={attempt.createdAt}>
                           {new Date(attempt.createdAt).toLocaleString()}

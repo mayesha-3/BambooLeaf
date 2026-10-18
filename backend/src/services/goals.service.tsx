@@ -18,6 +18,9 @@ import { getSigner, getSignerAddress, sendAuthorizedNativeTransfer, sendAuthoriz
 import { getToken } from '../chain/token-registry.tsx'
 import { getWalletSnapshot } from '../chain/wallet-snapshot.tsx'
 import { parseUnits } from 'ethers'
+import { policyWithVerifiedSupplierRecipients } from '../db/repositories/suppliers.repository.tsx'
+import { getAddress } from 'ethers'
+import { intentSchema } from '../guard/intent.schema.tsx'
 
 async function recordBlocked(database, requestId, reason, critical = false) {
   const previous = getState()
@@ -251,6 +254,7 @@ async function processGoal(
   requestId,
   untrusted?: string[],
   dependencies: { planGoal?: typeof planGoal; getWalletSnapshot?: typeof getWalletSnapshot } = {},
+  trustedPayment?: { intent; supplierId: string; invoiceId: string },
 ) {
   const planner = dependencies.planGoal ?? planGoal
   const readWalletSnapshot = dependencies.getWalletSnapshot ?? getWalletSnapshot
@@ -260,9 +264,9 @@ async function processGoal(
     data: { goalSha256: goalHash(goal), hasUntrusted: Array.isArray(untrusted) && untrusted.length > 0 },
   })
 
-  let intent
+  let intent = trustedPayment?.intent
   try {
-    intent = await planner(goal, Number(process.env.CHAIN_ID || 31337), untrusted)
+    if (!intent) intent = await planner(goal, Number(process.env.CHAIN_ID || 31337), untrusted)
   } catch (error) {
     const code = error.code || undefined
     const blockedCodes = [
@@ -308,7 +312,26 @@ async function processGoal(
     }
   }
 
-  const summary = intentSummary(intent)
+  const parsedIntent = intentSchema.safeParse(intent)
+  if (!parsedIntent.success) {
+    return { statusCode: 400, body: { requestId, status: 'not_executed', error: 'Trusted payment intent failed validation.' } }
+  }
+  intent = parsedIntent.data
+  if (trustedPayment?.supplierId) {
+    const supplier = await database.collection(COLLECTIONS.suppliers).findOne({ supplierId: trustedPayment.supplierId, status: 'active' })
+    if (!supplier || getAddress(supplier.payoutAccount).toLowerCase() !== getAddress(intent.recipient).toLowerCase()) {
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'invoice.supplier_registry_changed',
+        data: { invoiceId: trustedPayment.invoiceId, supplierId: trustedPayment.supplierId, reason: 'Supplier is no longer active or its registered payout address changed' },
+      })
+      return { statusCode: 409, body: { requestId, status: 'blocked', error: 'Verified supplier payout details changed; human review is required.' } }
+    }
+  }
+  const summary = {
+    ...intentSummary(intent),
+    ...(trustedPayment ? { supplierId: trustedPayment.supplierId, invoiceId: trustedPayment.invoiceId } : {}),
+  }
   await appendAuditEvent(database, {
     requestId,
     type: 'intent.proposed',
@@ -364,6 +387,7 @@ async function processGoal(
   let policy
   try {
     policy = readPolicyConfig()
+    if (trustedPayment) policy = await policyWithVerifiedSupplierRecipients(database, policy)
   } catch (error) {
     await appendAuditEvent(database, {
       requestId,
@@ -417,7 +441,7 @@ async function processGoal(
       return { statusCode: 200, body: { requestId, status: 'denied', tier: tier.tier, intent: summary, reasons: tier.reasons } }
     }
     try {
-      const approval = await createTransferApproval(database, intent, requestId)
+      const approval = await createTransferApproval(database, intent, requestId, trustedPayment?.invoiceId)
       return {
         statusCode: 202,
         body: {
@@ -525,6 +549,40 @@ async function processGoal(
   }
 }
 
+async function submitVerifiedSupplierPayment(database, invoiceId, requestId) {
+  const invoice = await database.collection(COLLECTIONS.invoices).findOne({ invoiceId, status: 'processing' })
+  if (!invoice) throw new Error('Invoice is not in a payable processing state.')
+  const supplier = await database.collection(COLLECTIONS.suppliers).findOne({
+    supplierId: invoice.supplierId,
+    status: 'active',
+  })
+  if (!supplier || getAddress(invoice.invoiceAccount).toLowerCase() !== getAddress(supplier.payoutAccount).toLowerCase()) {
+    throw new Error('Invoice does not match the currently verified supplier registry.')
+  }
+  const intent = intentSchema.parse({
+    intentId: randomUUID(),
+    action: 'transfer',
+    chainId: Number(process.env.CHAIN_ID || 31337),
+    from: { token: 'ETH', amount: invoice.amountEth },
+    recipient: getAddress(supplier.payoutAccount),
+    rationale: 'Verified supplier invoice payment',
+    sourceRefs: [],
+  })
+  await appendAuditEvent(database, {
+    requestId,
+    type: 'invoice.payment_proposed',
+    data: { invoiceId, supplierId: supplier.supplierId, amountEth: invoice.amountEth },
+  })
+  return processGoal(
+    database,
+    `Pay verified supplier invoice ${invoiceId}`,
+    requestId,
+    undefined,
+    undefined,
+    { intent, supplierId: supplier.supplierId, invoiceId },
+  )
+}
+
 async function submitGoal(database, goal, idempotencyKey, untrusted?: string[]) {
   const goals = database.collection(COLLECTIONS.goals)
   const requestId = randomUUID()
@@ -563,4 +621,4 @@ async function submitGoal(database, goal, idempotencyKey, untrusted?: string[]) 
   }
 }
 
-export { processGoal, submitGoal }
+export { processGoal, submitGoal, submitVerifiedSupplierPayment }

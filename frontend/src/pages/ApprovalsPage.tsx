@@ -4,6 +4,7 @@ import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import PageHeading from '../components/ui/PageHeading'
 import { apiBaseUrl } from '../config/api'
+import { authenticatedFetch } from '../lib/device-session'
 
 interface ApprovalItem {
   id: string
@@ -38,7 +39,7 @@ export default function ApprovalsPage() {
       return
     }
     try {
-      const response = await fetch(`${apiBaseUrl}/approvals`, {
+      const response = await authenticatedFetch(`${apiBaseUrl}/approvals`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       const payload = await response.json() as {
@@ -105,7 +106,7 @@ export default function ApprovalsPage() {
     setBusyId(item.id)
     setError('')
     try {
-      const response = await fetch(`${apiBaseUrl}/approvals/${item.id}/${approved ? 'approve' : 'reject'}`, {
+      const response = await authenticatedFetch(`${apiBaseUrl}/approvals/${item.id}/${approved ? 'approve' : 'reject'}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       })

@@ -12,6 +12,8 @@ async function ensureIndexes(database) {
     database.collection(COLLECTIONS.approvals).createIndex({ status: 1, expiresAt: 1 }),
     database.collection(COLLECTIONS.policyUsage).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     database.collection(COLLECTIONS.deviceAccounts).createIndex({ walletAddress: 1 }, { unique: true }),
+    database.collection(COLLECTIONS.roleAssignments).createIndex({ walletAddress: 1 }, { unique: true }),
+    database.collection(COLLECTIONS.trustedIps).createIndex({ ip: 1 }, { unique: true }),
     database.collection(COLLECTIONS.deviceChallenges).createIndex({ nonce: 1 }, { unique: true }),
     database.collection(COLLECTIONS.deviceChallenges).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     database.collection(COLLECTIONS.deviceSessions).createIndex({ tokenHash: 1 }, { unique: true }),
@@ -22,6 +24,11 @@ async function ensureIndexes(database) {
       { walletAddress: 1, type: 1, target: 1 },
       { unique: true },
     ),
+    database.collection(COLLECTIONS.suppliers).createIndex({ supplierId: 1 }, { unique: true }),
+    database.collection(COLLECTIONS.suppliers).createIndex({ normalizedName: 1 }, { unique: true }),
+    database.collection(COLLECTIONS.purchaseOrders).createIndex({ supplierId: 1, reference: 1 }, { unique: true }),
+    database.collection(COLLECTIONS.invoices).createIndex({ supplierNameNormalized: 1, invoiceNumber: 1 }, { unique: true }),
+    database.collection(COLLECTIONS.invoices).createIndex({ status: 1, createdAt: -1 }),
   ])
 }
 

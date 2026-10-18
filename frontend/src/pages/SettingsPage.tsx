@@ -4,6 +4,7 @@ import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import PageHeading from '../components/ui/PageHeading'
 import type { UserProfile } from '../types'
+import TrustedIpSettings from './TrustedIpSettings'
 
 interface SettingsPageProps {
   userProfile?: UserProfile
@@ -361,6 +362,7 @@ export default function SettingsPage({
       {/* TAB 3: SECURITY DEFAULTS */}
       {activeTab === 'security' && (
         <div className="grid gap-6 xl:grid-cols-2 animate-in fade-in duration-200">
+          <TrustedIpSettings />
           <Card className="p-6">
             <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Security defaults</h2>
             <p className="text-xs text-slate-400 mb-4">The UI never receives signer secrets</p>

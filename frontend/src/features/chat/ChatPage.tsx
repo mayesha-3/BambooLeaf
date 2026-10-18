@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { UserProfile } from '../../types'
+import { authenticatedFetch } from '../../lib/device-session'
 
 interface BalanceCard { kind: 'balance'; eth: string; usdc: string; total: string; change: string; chainId?: number }
 interface TransactionCard { kind: 'transaction'; status: 'confirmed' | 'pending' | 'blocked'; type: string; amount: string; to: string; hash?: string; reason?: string }
@@ -494,7 +495,7 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
     if (untrusted && untrusted.length > 0) {
       payload.untrusted = untrusted
     }
-    const res = await fetch(`${apiBaseUrl}/goal`, {
+    const res = await authenticatedFetch(`${apiBaseUrl}/goal`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
       body: JSON.stringify(payload),

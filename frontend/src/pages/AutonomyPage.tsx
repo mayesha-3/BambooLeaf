@@ -4,6 +4,7 @@ import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import PageHeading from '../components/ui/PageHeading'
 import { apiBaseUrl } from '../config/api'
+import { authenticatedFetch } from '../lib/device-session'
 
 type AutonomySnapshot = {
   level: 'L0' | 'L1' | 'L2' | 'L3'
@@ -27,7 +28,7 @@ export default function AutonomyPage() {
       return
     }
     try {
-      const response = await fetch(`${apiBaseUrl}/autonomy`, {
+      const response = await authenticatedFetch(`${apiBaseUrl}/autonomy`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       const payload = await response.json() as AutonomySnapshot & { error?: string }
@@ -58,7 +59,7 @@ export default function AutonomyPage() {
     setBusy(true)
     setError('')
     try {
-      const response = await fetch(`${apiBaseUrl}/autonomy/${resetting ? 'reset' : 'kill'}`, {
+      const response = await authenticatedFetch(`${apiBaseUrl}/autonomy/${resetting ? 'reset' : 'kill'}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       })

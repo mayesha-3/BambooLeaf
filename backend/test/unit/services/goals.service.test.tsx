@@ -33,10 +33,10 @@ test('balance checks succeed while the kill switch is active', async () => {
   try {
     const result = await processGoal(database, 'Check my balance', 'balance-request', undefined, {
       planGoal: async () => ({
-        intentId: 'balance-intent',
+        intentId: '00000000-0000-4000-8000-000000000001',
         action: 'read_balance',
         chainId: 31337,
-        token: 'ETH',
+        from: { token: 'ETH' },
         rationale: 'Read the guarded wallet balance.',
         sourceRefs: ['user_goal'],
       }),
@@ -71,11 +71,11 @@ test('transactions remain blocked while the kill switch is active', async () => 
   try {
     const result = await processGoal(database, 'Send ETH', 'transfer-request', undefined, {
       planGoal: async () => ({
-        intentId: 'transfer-intent',
+        intentId: '00000000-0000-4000-8000-000000000002',
         action: 'transfer',
         chainId: 31337,
         from: { token: 'ETH', amount: '0.01' },
-        recipient: { address: '0x0000000000000000000000000000000000000001' },
+        recipient: '0x0000000000000000000000000000000000000001',
         rationale: 'Send ETH.',
         sourceRefs: ['user_goal'],
       }),

@@ -10,19 +10,18 @@ import {
 
 const approvalIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-function authenticatedOwner(request, response) {
+function approvalOwner(request, response) {
+  if (request.userRole !== 'admin' && request.userRole !== 'approver') {
+    response.status(403).json({ error: 'Only an admin or approver can manage transaction approvals.' })
+    return null
+  }
   const configuredOwner = process.env.OWNER_WALLET_ADDRESS
-  const authenticatedWallet = request.deviceSession?.walletAddress
-  if (!configuredOwner || !authenticatedWallet) {
-    response.status(403).json({ error: 'Only the configured owner wallet can manage transaction approvals.' })
+  if (!configuredOwner) {
+    response.status(503).json({ error: 'OWNER_WALLET_ADDRESS must be configured for transaction approvals.' })
     return null
   }
   try {
     const owner = getAddress(configuredOwner).toLowerCase()
-    if (owner !== getAddress(authenticatedWallet).toLowerCase()) {
-      response.status(403).json({ error: 'Only the configured owner wallet can manage transaction approvals.' })
-      return null
-    }
     return owner
   } catch {
     response.status(503).json({ error: 'OWNER_WALLET_ADDRESS is invalid.' })
@@ -31,7 +30,7 @@ function authenticatedOwner(request, response) {
 }
 
 async function list(request, response, next) {
-  const owner = authenticatedOwner(request, response)
+  const owner = approvalOwner(request, response)
   if (!owner) return
   try {
     response.json({ approvals: await getPendingApprovals(getDatabase(), owner) })
@@ -60,7 +59,7 @@ async function status(request, response, next) {
 }
 
 async function approve(request, response, next) {
-  const owner = authenticatedOwner(request, response)
+  const owner = approvalOwner(request, response)
   if (!owner) return
   const approvalId = request.params.approvalId
   if (!approvalIdPattern.test(approvalId)) {
@@ -79,7 +78,7 @@ async function approve(request, response, next) {
 }
 
 async function reject(request, response, next) {
-  const owner = authenticatedOwner(request, response)
+  const owner = approvalOwner(request, response)
   if (!owner) return
   const approvalId = request.params.approvalId
   if (!approvalIdPattern.test(approvalId)) {

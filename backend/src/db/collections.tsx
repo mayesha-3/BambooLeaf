@@ -12,4 +12,10 @@ export const COLLECTIONS = Object.freeze({
   devices: 'devices',
   deviceAttempts: 'device_attempts',
   deviceBlocks: 'device_blocks',
+  suppliers: 'suppliers',
+  purchaseOrders: 'purchase_orders',
+  invoices: 'invoices',
+  runtimePolicy: 'runtime_policy',
+  roleAssignments: 'role_assignments',
+  trustedIps: 'trusted_ips',
 })

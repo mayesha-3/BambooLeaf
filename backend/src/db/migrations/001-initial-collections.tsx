@@ -25,6 +25,12 @@ async function migrateInitialCollections(database) {
     COLLECTIONS.devices,
     COLLECTIONS.deviceAttempts,
     COLLECTIONS.deviceBlocks,
+    COLLECTIONS.suppliers,
+    COLLECTIONS.purchaseOrders,
+    COLLECTIONS.invoices,
+    COLLECTIONS.runtimePolicy,
+    COLLECTIONS.roleAssignments,
+    COLLECTIONS.trustedIps,
   ]) {
     if (!existing.has(name)) {
       await database.createCollection(name)
