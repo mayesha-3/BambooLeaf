@@ -1,125 +1,148 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Icon from '../components/ui/Icon'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import PageHeading from '../components/ui/PageHeading'
+import { apiBaseUrl } from '../config/api'
 
-export default function PolicyPage() {
-  const [maxPerTx, setMaxPerTx] = useState('25')
-  const [dailyCap, setDailyCap] = useState('150')
-  const [recipientCap, setRecipientCap] = useState('50')
-  const [velocity, setVelocity] = useState('5')
-  const [saved, setSaved] = useState(false)
-  const [recipients, setRecipients] = useState(['0x7099…79C8', '0x3C44…93BC'])
+type PolicySnapshot = {
+  chainId: number
+  maxPerTxEth: string
+  maxPerRecipientPerDayEth: string
+  maxTransactionsPerWindow: number
+  velocityWindowSeconds: number
+  allowedRecipients: string[]
+  allowedContracts: string[]
+  allowedSwapRouters: string[]
+  swapRouterAddress: string | null
+  maxSlippageBps: number
+  maxSwapInputAmount: string | null
+  maxSwapPerTokenPerDay: string | null
+  supportedAssets: { symbol: string; address: string; decimals: number }[]
+}
+
+function PolicyPage() {
+  const [policy, setPolicy] = useState<PolicySnapshot | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    async function loadPolicy() {
+      try {
+        const response = await fetch(`${apiBaseUrl}/policy`, { signal: controller.signal })
+        const payload = await response.json() as PolicySnapshot & { error?: string }
+        if (!response.ok) throw new Error(payload.error || `Policy API returned ${response.status}`)
+        setPolicy(payload)
+        setError('')
+      } catch (loadError) {
+        if (controller.signal.aborted) return
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load active policy.')
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }
+    void loadPolicy()
+    return () => controller.abort()
+  }, [])
+
+  const chainLabel = policy ? `Chain ${policy.chainId}` : 'Configured chain'
+  const shortAddress = (address: string) => `${address.slice(0, 8)}…${address.slice(-6)}`
 
   return (
     <>
       <PageHeading
         eyebrow="Deterministic rules"
         title="Policy & limits"
-        description="Limits live in code and policy data—not in the model's prompt. Unknown destinations are never silently allowed."
-        action={<Badge tone="green"><Icon name="shield" size={12} /> Deny by default</Badge>}
+        description="Live, read-only limits loaded from the backend policy configuration. Update backend environment settings to change enforced limits."
+        action={<Badge tone={policy ? 'green' : 'amber'}><Icon name="shield" size={12} /> {policy ? 'ACTIVE POLICY' : 'POLICY UNAVAILABLE'}</Badge>}
       />
 
-      {saved && (
-        <div className="mb-4 rounded-2xl bg-lime-50 p-4 text-xs font-bold text-lime-900 border border-lime-200">
-          ✓ Preview policy updated locally.
-        </div>
-      )}
+      {error && <div role="alert" className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-xs font-semibold text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{error}</div>}
+      {loading && <p className="mb-4 text-xs text-slate-500">Loading active backend policy…</p>}
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="space-y-6">
           <Card className="p-6">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Spending limits</h2>
-            <p className="text-xs text-slate-400 mb-5">Applied to every proposed transaction</p>
+            <h2 className="mb-1 text-base font-bold text-slate-900 dark:text-white">Spending limits</h2>
+            <p className="mb-5 text-xs text-slate-400">Enforced by backend · {chainLabel}</p>
             <div className="space-y-4">
               {[
-                { label: 'Per transaction', value: maxPerTx, set: setMaxPerTx, prefix: '$', suffix: 'USD' },
-                { label: 'Daily total', value: dailyCap, set: setDailyCap, prefix: '$', suffix: 'USD' },
-                { label: 'Per-recipient daily cap', value: recipientCap, set: setRecipientCap, prefix: '$', suffix: 'USD' },
+                { label: 'Per transaction', value: policy ? `${policy.maxPerTxEth} ETH` : '—' },
+                { label: 'Per-recipient daily cap', value: policy ? `${policy.maxPerRecipientPerDayEth} ETH` : '—' },
+                { label: 'Transaction velocity', value: policy ? `${policy.maxTransactionsPerWindow} per ${policy.velocityWindowSeconds}s` : '—' },
+                { label: 'Maximum swap slippage', value: policy ? `${(policy.maxSlippageBps / 100).toFixed(2)}%` : '—' },
+                { label: 'Maximum swap input', value: policy?.maxSwapInputAmount ?? 'Not configured' },
+                { label: 'Per-token daily swap cap', value: policy?.maxSwapPerTokenPerDay ?? 'Not configured' },
               ].map((limit) => (
-                <label key={limit.label} className="flex items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-800/80 pt-4 first:border-0 first:pt-0">
+                <div key={limit.label} className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4 first:border-0 first:pt-0 dark:border-slate-800/80">
                   <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{limit.label}</span>
-                  <span className="flex items-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3">
-                    <span className="text-xs text-slate-400">{limit.prefix}</span>
-                    <input
-                      aria-label={limit.label}
-                      value={limit.value}
-                      onChange={(event) => limit.set(event.target.value)}
-                      className="w-16 py-2 text-right text-xs font-bold text-slate-800 dark:text-slate-100 bg-transparent outline-none"
-                    />
-                    <span className="ml-2 text-[10px] text-slate-400">{limit.suffix}</span>
-                  </span>
-                </label>
+                  <span className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-right text-xs font-bold text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">{limit.value}</span>
+                </div>
               ))}
-              <label className="flex items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-800/80 pt-4">
-                <span>
-                  <span className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Velocity limit</span>
-                  <span className="mt-0.5 block text-[10px] text-slate-400">Transactions per 10-minute window</span>
-                </span>
-                <span className="flex items-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3">
-                  <input
-                    aria-label="Transactions per window"
-                    value={velocity}
-                    onChange={(event) => setVelocity(event.target.value)}
-                    className="w-10 py-2 text-right text-xs font-bold text-slate-800 dark:text-slate-100 bg-transparent outline-none"
-                  />
-                  <span className="ml-2 text-[10px] text-slate-400">tx</span>
-                </span>
-              </label>
-              <div className="flex justify-end border-t border-slate-100 dark:border-slate-800/80 pt-4">
-                <button
-                  onClick={() => setSaved(true)}
-                  className="rounded-full bg-slate-950 dark:bg-lime-400 dark:text-slate-950 dark:hover:bg-lime-300 px-5 py-2.5 text-xs font-bold text-white hover:bg-slate-800 shadow-sm transition"
-                >
-                  Save policy preview
-                </button>
-              </div>
             </div>
           </Card>
 
           <Card className="p-6">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Allowed assets & contracts</h2>
-            <p className="text-xs text-slate-400 mb-4">Only supported tokens and reviewed protocol routes</p>
-            <div className="flex flex-wrap gap-2">
-              <span className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">◆ ETH <Badge tone="green">Token</Badge></span>
-              <span className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">◉ USDC <Badge tone="green">Token</Badge></span>
-              <span className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">⇄ DEX router <Badge tone="neutral">Contract</Badge></span>
-            </div>
+            <h2 className="mb-1 text-base font-bold text-slate-900 dark:text-white">Supported assets</h2>
+            <p className="mb-4 text-xs text-slate-400">Token registry on {chainLabel}; this is not a guarantee that every action is enabled.</p>
+            {!policy?.supportedAssets.length ? (
+              <p className="text-xs text-slate-500">No assets are registered for this chain.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {policy.supportedAssets.map((asset) => (
+                  <span key={`${asset.symbol}-${asset.address}`} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-200">
+                    {asset.symbol} <Badge tone="green">Token</Badge>
+                    <span className="font-mono text-[10px] font-normal text-slate-400">{asset.address === '0x0000000000000000000000000000000000000000' ? 'Native' : shortAddress(asset.address)}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            {policy?.allowedContracts.length ? (
+              <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800/80">
+                <p className="mb-3 text-xs font-semibold text-slate-700 dark:text-slate-300">Allowed contracts</p>
+                <div className="space-y-2">
+                  {policy.allowedContracts.map((address) => <p key={address} className="font-mono text-xs text-slate-500">{address}</p>)}
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 text-xs text-slate-400">No contracts are allow-listed.</p>
+            )}
           </Card>
         </div>
 
         <div className="space-y-6">
           <Card className="p-6">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Trusted recipients</h2>
-            <p className="text-xs text-slate-400 mb-4">New addresses route to human approval</p>
-            <div className="space-y-3">
-              {recipients.map((recipient) => (
-                <div key={recipient} className="flex items-center gap-3 border-t border-slate-100 dark:border-slate-800/80 py-3 first:border-0">
-                  <span className="grid h-8 w-8 place-items-center rounded-xl bg-lime-50 dark:bg-lime-950/50 text-[#65A30D] dark:text-lime-400">
-                    <Icon name="checkCircle" size={15} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200">{recipient}</p>
-                    <p className="text-[10px] text-slate-400">Saved recipient · Sepolia</p>
+            <h2 className="mb-1 text-base font-bold text-slate-900 dark:text-white">Trusted recipients</h2>
+            <p className="mb-4 text-xs text-slate-400">Loaded from the backend allowlist · {chainLabel}</p>
+            {policy?.allowedRecipients.length ? (
+              <div className="space-y-3">
+                {policy.allowedRecipients.map((recipient) => (
+                  <div key={recipient} className="flex items-center gap-3 border-t border-slate-100 py-3 first:border-0 dark:border-slate-800/80">
+                    <span className="grid h-8 w-8 place-items-center rounded-xl bg-lime-50 text-[#65A30D] dark:bg-lime-950/50 dark:text-lime-400">
+                      <Icon name="checkCircle" size={15} />
+                    </span>
+                    <p className="min-w-0 flex-1 break-all font-mono text-xs font-bold text-slate-700 dark:text-slate-200">{recipient}</p>
                   </div>
-                  <button onClick={() => setRecipients((curr) => curr.filter((r) => r !== recipient))} className="text-[10px] text-slate-400 hover:text-rose-600 font-bold transition">
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">No recipients are allow-listed. Transfers will be denied by policy.</p>
+            )}
           </Card>
 
           <Card className="p-6">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white mb-1">Always forbidden</h2>
-            <p className="text-xs text-slate-400 mb-4">No override path—even by prompt</p>
-            <div className="space-y-3">
-              {['Unlimited token approvals', 'Unknown contract calls', 'Ownership transfer / delegatecall', 'Intent-to-outcome mismatch'].map((item) => (
-                <div key={item} className="flex items-center gap-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  <Icon name="lock" size={14} className="text-rose-600 dark:text-rose-400" />
-                  {item}
-                </div>
+            <h2 className="mb-1 text-base font-bold text-slate-900 dark:text-white">Swap router</h2>
+            <p className="mb-4 text-xs text-slate-400">Only configured, allow-listed routes can be used.</p>
+            {policy?.swapRouterAddress ? (
+              <p className="break-all font-mono text-xs text-slate-700 dark:text-slate-200">{policy.swapRouterAddress}</p>
+            ) : (
+              <p className="text-xs text-slate-500">No swap router is configured.</p>
+            )}
+            <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800/80">
+              <p className="mb-2 text-[10px] font-semibold text-slate-400">{policy?.allowedSwapRouters.length ?? '—'} allow-listed router(s)</p>
+              {policy?.allowedSwapRouters.map((address) => (
+                <p key={address} className="mb-1 break-all font-mono text-[10px] text-slate-500">{address}</p>
               ))}
             </div>
           </Card>
@@ -128,3 +151,5 @@ export default function PolicyPage() {
     </>
   )
 }
+
+export default PolicyPage

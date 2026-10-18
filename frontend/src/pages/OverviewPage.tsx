@@ -3,13 +3,14 @@ import Icon from '../components/ui/Icon'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import GoalComposer from '../components/GoalComposer'
-import LiveRatesConverterCard from '../features/market/LiveRatesConverterCard'
 import { apiBaseUrl } from '../config/api'
 import type { AuditState, Page, UserProfile } from '../types'
 
 type WalletBalance = {
   address: string
   balanceEth: string
+  balanceUsdc: string | null
+  usdcAddress?: string | null
   chainId: number
 }
 
@@ -81,6 +82,7 @@ export default function OverviewPage({
           typeof payload.address !== 'string' ||
           typeof payload.balanceEth !== 'string' ||
           !Number.isFinite(Number(payload.balanceEth)) ||
+          !(typeof payload.balanceUsdc === 'string' || payload.balanceUsdc === null) ||
           typeof payload.chainId !== 'number' ||
           !Number.isInteger(payload.chainId)
         ) {
@@ -160,7 +162,10 @@ export default function OverviewPage({
   const walletAddress = walletState.balance?.address || ''
   const formattedBalance = walletState.balance
     ? `${Number(walletState.balance.balanceEth).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} ETH`
-    : '0.0000 ETH'
+    : '—'
+  const formattedUsdc = walletState.balance?.balanceUsdc !== null && walletState.balance?.balanceUsdc !== undefined
+    ? `${Number(walletState.balance.balanceUsdc).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`
+    : walletState.balance ? 'Not configured on this chain' : '—'
 
   return (
     <div className="space-y-6">
@@ -203,6 +208,9 @@ export default function OverviewPage({
                     </h2>
                     <p className="text-xs font-semibold text-slate-400 mt-1">
                       {walletState.error || (walletState.balance ? `Native wallet balance · Chain ${walletState.balance.chainId}` : 'Native wallet balance')}
+                    </p>
+                    <p className="mt-1 text-sm font-bold text-slate-700 dark:text-slate-200">
+                      {walletState.loading ? 'USDC: Loading…' : `USDC: ${formattedUsdc}`}
                     </p>
                   </div>
 
@@ -406,7 +414,6 @@ export default function OverviewPage({
             </Card>
           </div>
 
-          <LiveRatesConverterCard onOpenGoalModal={onOpenGoalModal} />
         </div>
 
         {/* ================= RIGHT COLUMN (4 COLUMNS) ================= */}
@@ -501,6 +508,10 @@ export default function OverviewPage({
               {auditState.entries.length > 0 ? (
                 auditState.entries.slice(0, 5).map((entry) => {
                   const status = getActivityStatus(entry.type)
+                  const amount = typeof entry.data.amount === 'string' ? entry.data.amount : ''
+                  const token = typeof entry.data.token === 'string' ? entry.data.token : ''
+                  const recipient = typeof entry.data.recipient === 'string' ? entry.data.recipient : ''
+                  const txHash = typeof entry.data.txHash === 'string' ? entry.data.txHash : ''
                   return (
                     <div key={`${entry.seq}-${entry.hash}`} className="py-3 flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -509,7 +520,14 @@ export default function OverviewPage({
                         </span>
                         <div>
                           <p className="text-xs font-bold text-slate-800 capitalize">{entry.type.replaceAll(".", " ")}</p>
-                          <p className="text-[10px] text-slate-400">{new Date(entry.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+                          <p className="text-[10px] text-slate-400">
+                            {amount && token ? `${amount} ${token}` : ''}
+                            {amount && recipient ? ' · ' : ''}
+                            {recipient ? `${recipient.slice(0, 8)}…${recipient.slice(-6)}` : ''}
+                            {(amount || recipient) ? ' · ' : ''}
+                            {new Date(entry.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                          {txHash && <p className="max-w-[220px] truncate font-mono text-[9px] text-slate-400" title={txHash}>Tx {txHash}</p>}
                         </div>
                       </div>
                       <Badge tone={status.tone}>{status.label}</Badge>

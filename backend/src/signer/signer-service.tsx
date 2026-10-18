@@ -200,7 +200,7 @@ async function simulateAuthorizedSwap(intent, authorization) {
   }
 }
 
-function sendAuthorizedNativeTransfer(intent, authorization) {
+function sendAuthorizedNativeTransfer(intent, authorization, { onBroadcast } = {}) {
   requireKillSwitchOff()
   const operation = sendQueue.then(async () => {
     requireKillSwitchOff()
@@ -279,6 +279,13 @@ function sendAuthorizedNativeTransfer(intent, authorization) {
       nonce,
       gasLimit: 21000,
     })
+    if (onBroadcast) {
+      try {
+        await onBroadcast(response.hash)
+      } catch (error) {
+        console.error('Failed to persist broadcast transaction details.', error)
+      }
+    }
     const receipt = await response.wait()
     if (!receipt || receipt.status !== 1) {
       throw new Error('Transaction was not confirmed successfully')

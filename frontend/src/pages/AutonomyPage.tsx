@@ -48,7 +48,7 @@ export default function AutonomyPage() {
 
   async function changeSafetyState() {
     if (!snapshot) return
-    const resetting = snapshot.frozen
+    const resetting = snapshot.frozen || snapshot.level === 'L0'
     if (resetting && !window.confirm('Reset to L1? Signing permissions will be restored only at the restricted level.')) return
     const token = window.sessionStorage.getItem('bambooleaf-device-session')
     if (!token) {
@@ -74,6 +74,7 @@ export default function AutonomyPage() {
 
   const frozen = snapshot?.frozen ?? false
   const level = frozen ? 'L0' : snapshot?.level ?? '—'
+  const requiresHumanReset = frozen || level === 'L0'
   const levelName = level === 'L0' ? 'Read-only' : level === 'L1' ? 'Restricted' : level === 'L2' ? 'Standard autonomy' : level === 'L3' ? 'Trusted autonomy' : 'Loading state'
 
   return (
@@ -82,7 +83,7 @@ export default function AutonomyPage() {
         eyebrow="Trust follows evidence"
         title="Autonomy & safety"
         description="The agent earns narrowly scoped capability over time—and loses it immediately when behaviour looks suspicious."
-        action={<Badge tone={frozen ? 'red' : snapshot ? 'green' : 'amber'}>{frozen ? 'FROZEN · L0' : snapshot ? `ACTIVE · ${level}` : 'STATE UNAVAILABLE'}</Badge>}
+        action={<Badge tone={frozen ? 'red' : level === 'L0' ? 'amber' : snapshot ? 'green' : 'amber'}>{frozen ? 'FROZEN · L0' : level === 'L0' ? 'READ-ONLY · L0' : snapshot ? `ACTIVE · ${level}` : 'STATE UNAVAILABLE'}</Badge>}
       />
 
       {error && <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{error}</div>}
@@ -96,18 +97,18 @@ export default function AutonomyPage() {
                 <span className="mb-1 text-sm text-slate-300">{levelName}</span>
               </div>
               <p className="mt-3 max-w-md text-xs leading-5 text-slate-300">
-                {frozen
-                  ? 'All signing is paused. Only a human reset can restore action permissions.'
+                {requiresHumanReset
+                  ? 'L0 is read-only and blocks transactions. Only an owner human reset can restore action permissions.'
                   : 'Routine low-risk actions may proceed within policy. New or elevated-risk actions still require approval.'}
               </p>
             </div>
             <button
               onClick={() => void changeSafetyState()}
               disabled={!snapshot || busy}
-              className={`rounded-full px-5 py-2.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${frozen ? 'bg-white text-slate-950 hover:bg-slate-100' : 'border border-white/20 bg-white/10 text-white hover:bg-white/20'
+              className={`rounded-full px-5 py-2.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${requiresHumanReset ? 'bg-white text-slate-950 hover:bg-slate-100' : 'border border-white/20 bg-white/10 text-white hover:bg-white/20'
                 }`}
             >
-              {busy ? 'Updating…' : frozen ? 'Human reset to L1' : 'Activate kill switch'}
+              {busy ? 'Updating…' : requiresHumanReset ? 'Human reset to L1' : 'Activate kill switch'}
             </button>
           </div>
         </div>

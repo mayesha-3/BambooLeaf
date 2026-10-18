@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { UserProfile } from '../../types'
 
-interface BalanceCard { kind: 'balance'; eth: string; usdc: string; total: string; change: string }
+interface BalanceCard { kind: 'balance'; eth: string; usdc: string; total: string; change: string; chainId?: number }
 interface TransactionCard { kind: 'transaction'; status: 'confirmed' | 'pending' | 'blocked'; type: string; amount: string; to: string; hash?: string; reason?: string }
 interface PolicyCard { kind: 'policy'; perTxCap: string; dailyCap: string; usedToday: string; autonomyLevel: string }
 interface ApprovalCard { kind: 'approval'; description: string; amount: string; expires: string; approvalId?: string; onApprove?: () => void; onReject?: () => void }
@@ -18,7 +18,7 @@ interface GoalApiResponse {
   error?: string
   code?: string
   intent?: GoalIntentSummary
-  data?: { balanceEth?: string; balanceUsdc?: string }
+  data?: { balanceEth?: string; balanceUsdc?: string; chainId?: number }
   approvalId?: string
   approval?: { id?: string; digest?: string; expiresAt?: number }
 }
@@ -50,7 +50,7 @@ function BalanceCardView({ card }: { card: BalanceCard }) {
     <div className="mt-2 rounded-2xl border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-[0_4px_20px_rgba(0,0,0,0.04)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] overflow-hidden max-w-[340px]">
       <div className="px-5 py-4 flex items-center justify-between" style={{ background: 'linear-gradient(135deg, #84CC16 0%, #4D7C0F 100%)' }}>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-lime-50/80 font-mono">Guarded wallet · Sepolia</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-lime-50/80 font-mono">Guarded wallet · Chain {card.chainId ?? '—'}</p>
           <p className="text-2xl font-black text-white mt-1 tracking-tight font-display">{card.total}</p>
         </div>
         <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
@@ -110,7 +110,7 @@ function PolicyCardView({ card }: { card: PolicyCard }) {
 
 function ApprovalCardView({ card }: { card: ApprovalCard }) {
   const hasSession = Boolean(window.sessionStorage.getItem('bambooleaf-device-session'))
-  const [status, setStatus] = useState<'checking' | 'idle' | 'loading' | 'approved' | 'rejected' | 'closed' | 'error'>(
+  const [status, setStatus] = useState<'checking' | 'idle' | 'loading' | 'executing' | 'approved' | 'rejected' | 'failed' | 'expired' | 'closed' | 'error'>(
     card.approvalId && hasSession ? 'checking' : 'error',
   )
   const [errorMessage, setErrorMessage] = useState(
@@ -121,6 +121,7 @@ function ApprovalCardView({ card }: { card: ApprovalCard }) {
         : 'Sign in with your wallet to check this approval.',
   )
   const [txHash, setTxHash] = useState<string | null>(null)
+  const [failureReason, setFailureReason] = useState('')
   const approvalHeaders = () => {
     const token = window.sessionStorage.getItem('bambooleaf-device-session')
     if (!token) throw new Error('Sign in with your wallet before managing approvals.')
@@ -139,8 +140,23 @@ function ApprovalCardView({ card }: { card: ApprovalCard }) {
         if (!Array.isArray(data.approvals)) throw new Error('Approval status response was invalid.')
         return data.approvals.some((approval) => approval.approvalId === card.approvalId)
       })
-      .then((isPending) => {
-        if (active) setStatus(isPending ? 'idle' : 'closed')
+      .then(async (isPending) => {
+        if (!active) return
+        if (isPending) {
+          setStatus('idle')
+          return
+        }
+        const response = await fetch(`${apiBaseUrl}/approvals/${card.approvalId}`, { headers: approvalHeaders() })
+        const result = await response.json() as { status?: string; txHash?: string | null; failureReason?: string | null; error?: string }
+        if (!response.ok) throw new Error(result.error || 'Could not verify approval status.')
+        if (result.txHash) setTxHash(result.txHash)
+        if (result.failureReason) setFailureReason(result.failureReason)
+        if (result.status === 'approved') setStatus('approved')
+        else if (result.status === 'rejected') setStatus('rejected')
+        else if (result.status === 'executing') setStatus('executing')
+        else if (result.status === 'expired') setStatus('expired')
+        else if (['failed', 'stale', 'denied'].includes(result.status || '')) setStatus('failed')
+        else setStatus('closed')
       })
       .catch((error: unknown) => {
         if (!active) return
@@ -151,6 +167,41 @@ function ApprovalCardView({ card }: { card: ApprovalCard }) {
       active = false
     }
   }, [card.approvalId])
+
+  useEffect(() => {
+    if (status !== 'executing' || !card.approvalId) return
+    let active = true
+    let timer: number
+    const poll = async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/approvals/${card.approvalId}`, {
+          headers: {
+            Authorization: `Bearer ${window.sessionStorage.getItem('bambooleaf-device-session') || ''}`,
+          },
+        })
+        const result = await response.json() as { status?: string; txHash?: string | null; failureReason?: string | null; error?: string }
+        if (!response.ok) throw new Error(result.error || 'Could not refresh transaction status.')
+        if (!active) return
+        if (result.txHash) setTxHash(result.txHash)
+        if (result.failureReason) setFailureReason(result.failureReason)
+        if (result.status === 'approved') setStatus('approved')
+        else if (result.status === 'rejected') setStatus('rejected')
+        else if (result.status === 'expired') setStatus('expired')
+        else if (['failed', 'stale', 'denied'].includes(result.status || '')) setStatus('failed')
+        else if (result.status !== 'executing') setStatus('closed')
+        else timer = window.setTimeout(() => void poll(), 2000)
+      } catch (error) {
+        if (!active) return
+        setErrorMessage(error instanceof Error ? error.message : 'Could not refresh transaction status.')
+        setStatus('error')
+      }
+    }
+    timer = window.setTimeout(() => void poll(), 2000)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [card.approvalId, status])
 
   const handleApprove = async () => {
     if (!card.approvalId) {
@@ -227,6 +278,9 @@ function ApprovalCardView({ card }: { card: ApprovalCard }) {
       )}
       {status === 'approved' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-lime-50 dark:bg-lime-950/60 text-[#65A30D] dark:text-lime-400">✓ Transaction confirmed{txHash ? <span className="mt-1 block break-all font-mono text-[10px]">{txHash}</span> : null}</div>}
       {status === 'rejected' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">✗ Transaction rejected</div>}
+      {status === 'executing' && <div className="mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">Transaction broadcast; waiting for chain confirmation.{txHash ? <span className="mt-1 block break-all font-mono text-[10px]">{txHash}</span> : null}</div>}
+      {status === 'expired' && <div className="mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">Approval expired. Submit the transaction again to request a fresh approval.</div>}
+      {status === 'failed' && <div role="alert" className="mt-3 rounded-xl px-3 py-2 text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300">Transaction was not confirmed: {failureReason || 'Check Activity Log for the execution result.'}{txHash ? <span className="mt-1 block break-all font-mono text-[10px]">Broadcast transaction: {txHash}</span> : null}</div>}
       {status === 'closed' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">This approval is no longer pending. Check the Approval Queue for its latest status.</div>}
       {status === 'error' && <div role="alert" className="mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">⚠ {errorMessage}</div>}
     </div>
@@ -455,7 +509,7 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
           id, role: 'agent',
           text: "Here's your current guarded wallet balance:",
           toolCalls: [{ name: 'wallet.getBalance()', status: 'done' as const, detail: `${data.data.balanceEth} ETH, ${data.data.balanceUsdc} USDC` }],
-          cards: [{ kind: 'balance', eth: `${data.data.balanceEth} ETH`, usdc: `${data.data.balanceUsdc} USDC`, total: `${data.data.balanceEth} ETH`, change: '+0.00%' } as BalanceCard],
+          cards: [{ kind: 'balance', eth: `${data.data.balanceEth} ETH`, usdc: `${data.data.balanceUsdc} USDC`, total: `${data.data.balanceEth} ETH`, change: '+0.00%', chainId: data.data.chainId } as BalanceCard],
           ts: new Date(),
         }
       }
@@ -577,10 +631,13 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
   const [isTyping, setIsTyping] = useState(false)
   const [showAttachment, setShowAttachment] = useState(false)
   const [attachmentText, setAttachmentText] = useState('')
+  const [attachmentFileName, setAttachmentFileName] = useState('')
+  const [attachmentError, setAttachmentError] = useState('')
   const [contextPanelWidth, setContextPanelWidth] = useState(280)
   const contextResizing = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isTyping])
 
@@ -613,7 +670,10 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
     const untrustedTrimmed = attachmentText.trim()
     if (!trimmed || isTyping) return
 
-    const untrustedList = untrustedTrimmed ? [untrustedTrimmed] : undefined
+    const attachmentContent = attachmentFileName
+      ? `Attached file: ${attachmentFileName}\n${untrustedTrimmed}`
+      : untrustedTrimmed
+    const untrustedList = attachmentContent ? [attachmentContent] : undefined
 
     setMessages(prev => [...prev, {
       id: crypto.randomUUID(),
@@ -624,6 +684,8 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
     }])
     setInput('')
     setAttachmentText('')
+    setAttachmentFileName('')
+    setAttachmentError('')
     setShowAttachment(false)
     setIsTyping(true)
     const agentMsg = await getAgentResponse(trimmed, untrustedList)
@@ -633,6 +695,26 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
 
   function handleSubmit(e: FormEvent) { e.preventDefault(); send(input) }
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input) } }
+
+  async function handleAttachmentFile(file?: File) {
+    if (!file) return
+    if (file.size > 16 * 1024) {
+      setAttachmentError('Choose a text file no larger than 16 KB, or paste the relevant invoice text.')
+      return
+    }
+    if (!/\.(txt|md|csv|json)$/i.test(file.name)) {
+      setAttachmentError('Supported files: .txt, .md, .csv, and .json. For PDFs, copy and paste the invoice text.')
+      return
+    }
+    try {
+      const content = await file.text()
+      setAttachmentText(content)
+      setAttachmentFileName(file.name)
+      setAttachmentError('')
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? `Unable to read file: ${error.message}` : 'Unable to read selected file.')
+    }
+  }
 
   return (
     <div className="flex h-full overflow-hidden bg-[#FBFBFC] dark:bg-[#090e1a] transition-colors">
@@ -651,7 +733,10 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
             </div>
             <button
               type="button"
-              onClick={() => setShowAttachment(prev => !prev)}
+              onClick={() => {
+                setShowAttachment((prev) => !prev)
+                setAttachmentError('')
+              }}
               className={`inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-3 py-1.5 transition ${showAttachment ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 border border-dashed border-slate-300 dark:border-slate-700'}`}
             >
               <Icon d={Icons.paperclip} size={12} />
@@ -666,20 +751,38 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
                   <Icon d={Icons.shield} size={13} className="text-amber-600 dark:text-amber-400" />
                   Untrusted Content · Inspected by Quarantine
                 </span>
-                <button type="button" onClick={() => { setShowAttachment(false); setAttachmentText('') }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold">
+                <button type="button" onClick={() => { setShowAttachment(false); setAttachmentText(''); setAttachmentFileName(''); setAttachmentError('') }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold">
                   ✕ Cancel
                 </button>
               </div>
               <textarea
                 value={attachmentText}
-                onChange={e => setAttachmentText(e.target.value)}
+                onChange={e => { setAttachmentText(e.target.value); setAttachmentFileName('') }}
                 placeholder="Paste invoice text, memo, or external payment details to be inspected before planning..."
                 rows={2}
-                maxLength={2000}
+                maxLength={6000}
                 className="w-full resize-none rounded-xl border border-amber-200/80 dark:border-amber-900/60 bg-white dark:bg-slate-900 p-2.5 text-xs font-mono text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
               />
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  ref={attachmentInputRef}
+                  type="file"
+                  accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+                  className="hidden"
+                  onChange={(event) => { void handleAttachmentFile(event.currentTarget.files?.[0]); event.currentTarget.value = '' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => attachmentInputRef.current?.click()}
+                  className="rounded-full border border-amber-300 px-3 py-1.5 text-[10px] font-bold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950/60"
+                >
+                  Choose text file
+                </button>
+                {attachmentFileName && <span className="max-w-full truncate text-[10px] font-semibold text-amber-900 dark:text-amber-300">{attachmentFileName}</span>}
+              </div>
+              {attachmentError && <p role="alert" className="text-[10px] font-semibold text-rose-700 dark:text-rose-300">{attachmentError}</p>}
               <p className="text-[10px] text-amber-800/80 dark:text-amber-400/80 font-medium">
-                Quarantine guard blocks prompt injection or malicious transaction commands.
+                File text and pasted content are untrusted and inspected by quarantine before planning. Maximum file size: 16 KB.
               </p>
             </div>
           )}

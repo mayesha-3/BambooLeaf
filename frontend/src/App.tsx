@@ -217,11 +217,12 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    if (page !== 'overview' && page !== 'activity' && page !== 'approvals') return
     const timer = window.setTimeout(() => {
       void refreshAudit()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [refreshAudit])
+  }, [page, refreshAudit])
 
   // Global cmd+k listener
   useEffect(() => {
@@ -589,7 +590,7 @@ export function App() {
               {page === 'approvals' && <ApprovalsPage />}
               {page === 'policy' && <PolicyPage />}
               {page === 'autonomy' && <AutonomyPage />}
-              {page === 'wallet' && <WalletPage userProfile={userProfile} />}
+              {page === 'wallet' && <WalletPage userProfile={userProfile} onNavigate={navigate} />}
               {page === 'arena' && <ArenaPage />}
               {page === 'compliance' && <ComplianceConsole />}
               {page === 'settings' && (

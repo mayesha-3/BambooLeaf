@@ -45,6 +45,9 @@ export default function ActivityPage({ auditState, refreshAudit }: ActivityPageP
     if (type.includes('confirmed') || type.includes('allowed')) {
       return { bg: 'bg-lime-50 dark:bg-lime-950/50 border border-lime-200 dark:border-lime-900/60', text: 'text-[#65A30D] dark:text-lime-400', label: 'Verified' }
     }
+    if (type.includes('broadcast') || type.includes('executing')) {
+      return { bg: 'bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-900/60', text: 'text-amber-700 dark:text-amber-400', label: 'Broadcast · awaiting confirmation' }
+    }
     return { bg: 'bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700', text: 'text-slate-600 dark:text-slate-300', label: 'Audit Log' }
   }
 
@@ -191,6 +194,10 @@ export default function ActivityPage({ auditState, refreshAudit }: ActivityPageP
                     : typeof entry.data?.error === 'string'
                     ? entry.data.error
                     : null
+                  const amount = typeof entry.data?.amount === 'string' ? entry.data.amount : ''
+                  const token = typeof entry.data?.token === 'string' ? entry.data.token : ''
+                  const recipient = typeof entry.data?.recipient === 'string' ? entry.data.recipient : ''
+                  const txHash = typeof entry.data?.txHash === 'string' ? entry.data.txHash : ''
 
                   return (
                     <div
@@ -239,6 +246,18 @@ export default function ActivityPage({ auditState, refreshAudit }: ActivityPageP
                             {reason && (
                               <p className="mt-1 text-xs text-rose-700 dark:text-rose-300 font-medium">
                                 Reason: {reason}
+                              </p>
+                            )}
+                            {(amount || recipient) && (
+                              <p className="mt-1 break-all text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                                {amount && token ? `${amount} ${token}` : ''}
+                                {amount && recipient ? ' · ' : ''}
+                                {recipient ? `to ${recipient}` : ''}
+                              </p>
+                            )}
+                            {txHash && (
+                              <p className="mt-1 break-all font-mono text-[10px] text-slate-500 dark:text-slate-400">
+                                Transaction hash: {txHash}
                               </p>
                             )}
                           </div>

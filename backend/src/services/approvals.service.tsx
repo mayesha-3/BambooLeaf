@@ -125,6 +125,24 @@ async function getPendingApprovals(database, ownerWallet) {
   return (await listPendingApprovals(database)).filter((item) => item.ownerWallet === ownerWallet.toLowerCase())
 }
 
+async function getApprovalStatus(database, approvalId, ownerWallet) {
+  const approval = await findApproval(database, approvalId)
+  if (!approval || approval.ownerWallet !== ownerWallet.toLowerCase()) {
+    throw new ApprovalError(404, 'Approval request was not found.')
+  }
+  if (approval.status === 'pending' && approval.expiresAt <= Date.now()) {
+    await updateApproval(database, approvalId, 'expired')
+    approval.status = 'expired'
+  }
+  return {
+    approvalId: approval.approvalId,
+    status: approval.status,
+    expiresAt: approval.expiresAt,
+    txHash: approval.txHash || null,
+    failureReason: approval.failureReason || null,
+  }
+}
+
 async function rejectTransferApproval(database, approvalId, ownerWallet, requestId) {
   const approval = await findApproval(database, approvalId)
   if (!approval || approval.ownerWallet !== ownerWallet.toLowerCase()) {
@@ -237,7 +255,16 @@ async function approveTransfer(database, approvalId, ownerWallet, requestId) {
       }, approval.expiresAt),
       approvedDigest: approval.digest,
     }
-    const transaction = await sendAuthorizedNativeTransfer(intent, authorization)
+    const transaction = await sendAuthorizedNativeTransfer(intent, authorization, {
+      onBroadcast: async (txHash) => {
+        await updateApproval(database, approvalId, 'executing', { txHash, broadcastAt: new Date() })
+        await appendAuditEvent(database, {
+          requestId,
+          type: 'transaction.broadcast',
+          data: { approvalId, txHash, recipient: intent.recipient, amount: intent.from.amount, token: intent.from.token },
+        })
+      },
+    })
     confirmedTransaction = transaction
     const previousState = getState()
     recordCleanExecution()
@@ -260,7 +287,26 @@ async function approveTransfer(database, approvalId, ownerWallet, requestId) {
     await appendAuditEvent(database, {
       requestId,
       type: 'approval.executed',
-      data: { approvalId, digest: transaction.digest, txHash: transaction.txHash },
+      data: {
+        approvalId,
+        digest: transaction.digest,
+        txHash: transaction.txHash,
+        recipient: intent.recipient,
+        amount: intent.from.amount,
+        token: intent.from.token,
+      },
+    })
+    await appendAuditEvent(database, {
+      requestId,
+      type: 'transaction.confirmed',
+      data: {
+        approvalId,
+        txHash: transaction.txHash,
+        recipient: intent.recipient,
+        amount: intent.from.amount,
+        token: intent.from.token,
+        chainId: intent.chainId,
+      },
     })
     try {
       await saveAutonomyState(database, currentState)
@@ -277,7 +323,13 @@ async function approveTransfer(database, approvalId, ownerWallet, requestId) {
     if (current?.status === 'executing' && !confirmedTransaction) {
       const reason = error instanceof Error ? error.message : 'Transaction execution failed'
       const requiresFreshReview = /kill switch|nonce changed|digest mismatch|authorization .*invalid|expired|chain changed/i.test(reason)
-      await updateApproval(database, approvalId, requiresFreshReview ? 'stale' : 'failed', { failureReason: reason })
+      const status = requiresFreshReview ? 'stale' : 'failed'
+      await updateApproval(database, approvalId, status, { failureReason: reason })
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'approval.execution_failed',
+        data: { approvalId, status, reason, recipient: intent.recipient, amount: intent.from.amount, token: intent.from.token },
+      })
       if (requiresFreshReview) await recordBlocked(database, requestId, reason)
     }
     if (confirmedTransaction) {
@@ -290,4 +342,4 @@ async function approveTransfer(database, approvalId, ownerWallet, requestId) {
   }
 }
 
-export { approveTransfer, createTransferApproval, getPendingApprovals, rejectTransferApproval }
+export { approveTransfer, createTransferApproval, getApprovalStatus, getPendingApprovals, rejectTransferApproval }

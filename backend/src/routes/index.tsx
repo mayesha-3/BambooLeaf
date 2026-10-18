@@ -5,6 +5,7 @@ import auditRoutes from './audit.routes.tsx'
 import autonomyRoutes from './autonomy.routes.tsx'
 import deviceRoutes from './devices.routes.tsx'
 import goalRoutes from './goals.routes.tsx'
+import policyRoutes from './policy.routes.tsx'
 import walletRoutes from './wallet.routes.tsx'
 
 
@@ -15,6 +16,7 @@ router.use('/approvals', approvalRoutes)
 router.use('/audit', auditRoutes)
 router.use('/autonomy', autonomyRoutes)
 router.use('/devices', deviceRoutes)
+router.use('/policy', policyRoutes)
 router.use('/wallet', walletRoutes)
 
 export default router

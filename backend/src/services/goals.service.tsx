@@ -16,6 +16,7 @@ import { createTransferApproval } from './approvals.service.tsx'
 import { reserveTransfer } from '../db/repositories/policy-usage.repository.tsx'
 import { getSigner, getSignerAddress, sendAuthorizedNativeTransfer, sendAuthorizedSwap, simulateAuthorizedSwap } from '../signer/signer-service.tsx'
 import { getToken } from '../chain/token-registry.tsx'
+import { getWalletSnapshot } from '../chain/wallet-snapshot.tsx'
 import { parseUnits } from 'ethers'
 
 async function recordBlocked(database, requestId, reason, critical = false) {
@@ -78,8 +79,8 @@ function intentSummary(intent) {
     intentId: intent.intentId,
     action: intent.action,
     chainId: intent.chainId,
-    token: intent.from.token,
-    amount: intent.from.amount ?? null,
+    token: intent.from?.token ?? intent.token ?? null,
+    amount: intent.from?.amount ?? null,
     recipient: intent.recipient ?? null,
     targetToken: intent.to?.token ?? null,
   }
@@ -244,28 +245,24 @@ async function processSwap(database, intent, summary, policy, requestId) {
   }
 }
 
-async function processGoal(database, goal, requestId, untrusted?: string[]) {
+async function processGoal(
+  database,
+  goal,
+  requestId,
+  untrusted?: string[],
+  dependencies: { planGoal?: typeof planGoal; getWalletSnapshot?: typeof getWalletSnapshot } = {},
+) {
+  const planner = dependencies.planGoal ?? planGoal
+  const readWalletSnapshot = dependencies.getWalletSnapshot ?? getWalletSnapshot
   await appendAuditEvent(database, {
     requestId,
     type: 'goal.received',
     data: { goalSha256: goalHash(goal), hasUntrusted: Array.isArray(untrusted) && untrusted.length > 0 },
   })
 
-  if (isKillSwitchActive()) {
-    await appendAuditEvent(database, {
-      requestId,
-      type: 'planner.blocked',
-      data: { code: 'KILL_SWITCH_ACTIVE', reason: 'Agent is frozen; planner was not called' },
-    })
-    return {
-      statusCode: 423,
-      body: { requestId, status: 'blocked', code: 'KILL_SWITCH_ACTIVE', error: 'Agent is frozen; nothing was executed.' },
-    }
-  }
-
   let intent
   try {
-    intent = await planGoal(goal, Number(process.env.CHAIN_ID || 31337), untrusted)
+    intent = await planner(goal, Number(process.env.CHAIN_ID || 31337), untrusted)
   } catch (error) {
     const code = error.code || undefined
     const blockedCodes = [
@@ -278,6 +275,10 @@ async function processGoal(database, goal, requestId, untrusted?: string[]) {
       'UNKNOWN_CONTACT',
       'PROVIDERS_UNAVAILABLE',
       'BUDGET_EXCEEDED',
+       'APPROVAL_EXPIRED',
+  'DIGEST_MISMATCH',
+  'SIMULATION_FAILED',
+  'TIER_3_FORBIDDEN'
     ]
     if (code && blockedCodes.includes(code)) {
       await recordBlocked(
@@ -313,6 +314,52 @@ async function processGoal(database, goal, requestId, untrusted?: string[]) {
     type: 'intent.proposed',
     data: summary,
   })
+
+  if (intent.action === 'read_balance') {
+    try {
+      const balance = await readWalletSnapshot()
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'wallet.balance_read',
+        data: { chainId: balance.chainId },
+      })
+      return {
+        statusCode: 200,
+        body: { requestId, status: 'success', intent: summary, data: balance },
+      }
+    } catch (error) {
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'wallet.balance_read_failed',
+        data: { reason: error instanceof Error ? error.message : 'Unknown wallet read error' },
+      })
+      return {
+        statusCode: 503,
+        body: {
+          requestId,
+          status: 'not_executed',
+          error: error instanceof Error ? error.message : 'Unable to read wallet balance.',
+        },
+      }
+    }
+  }
+
+  if (isKillSwitchActive()) {
+    await appendAuditEvent(database, {
+      requestId,
+      type: 'planner.blocked',
+      data: { code: 'KILL_SWITCH_ACTIVE', reason: 'Agent is frozen; transaction execution is disabled' },
+    })
+    return {
+      statusCode: 423,
+      body: {
+        requestId,
+        status: 'blocked',
+        code: 'KILL_SWITCH_ACTIVE',
+        error: 'Agent is frozen; transaction was not executed. An owner must reset autonomy before sending transactions.',
+      },
+    }
+  }
 
   let policy
   try {
@@ -516,4 +563,4 @@ async function submitGoal(database, goal, idempotencyKey, untrusted?: string[]) 
   }
 }
 
-export { submitGoal }
+export { processGoal, submitGoal }

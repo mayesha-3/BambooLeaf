@@ -3,6 +3,7 @@ import { getDatabase } from '../db/connection.tsx'
 import {
   ApprovalError,
   approveTransfer,
+  getApprovalStatus,
   getPendingApprovals,
   rejectTransferApproval,
 } from '../services/approvals.service.tsx'
@@ -35,6 +36,25 @@ async function list(request, response, next) {
   try {
     response.json({ approvals: await getPendingApprovals(getDatabase(), owner) })
   } catch (error) {
+    next(error)
+  }
+}
+
+async function status(request, response, next) {
+  const owner = authenticatedOwner(request, response)
+  if (!owner) return
+  const approvalId = request.params.approvalId
+  if (!approvalIdPattern.test(approvalId)) {
+    response.status(400).json({ error: 'Approval identifier is invalid.' })
+    return
+  }
+  try {
+    response.json(await getApprovalStatus(getDatabase(), approvalId, owner))
+  } catch (error) {
+    if (error instanceof ApprovalError) {
+      response.status(error.statusCode).json({ error: error.message })
+      return
+    }
     next(error)
   }
 }
@@ -77,4 +97,4 @@ async function reject(request, response, next) {
   }
 }
 
-export { approve, list, reject }
+export { approve, list, reject, status }

@@ -44,6 +44,14 @@ export function getToken(symbol: string, chainId: number): TokenInfo {
       chainId,
     }
   }
+  if (normalizedSymbol === 'ETH') {
+    return {
+      symbol: 'ETH',
+      address: '0x0000000000000000000000000000000000000000',
+      decimals: 18,
+      chainId,
+    }
+  }
   const token = TOKENS.find(
     (t) => t.symbol === normalizedSymbol && t.chainId === chainId,
   )
@@ -58,7 +66,22 @@ export function isNativeToken(symbol: string): boolean {
 }
 
 export function listTokens(chainId: number): TokenInfo[] {
-  return TOKENS.filter((t) => t.chainId === chainId)
+  const symbols = new Set([
+    'ETH',
+    ...TOKENS.filter((token) => token.chainId === chainId).map((token) => token.symbol),
+    ...Object.keys(process.env)
+      .map((key) => key.match(/^TOKEN_([A-Z0-9]+)_ADDRESS$/)?.[1])
+      .filter((symbol): symbol is string => Boolean(symbol)),
+  ])
+
+  return [...symbols].flatMap((symbol) => {
+    try {
+      return [getToken(symbol, chainId)]
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Unknown token:')) return []
+      throw error
+    }
+  })
 }
 
 export function normalizeAddress(address: string): string {

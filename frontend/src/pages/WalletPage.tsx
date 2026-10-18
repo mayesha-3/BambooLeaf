@@ -1,18 +1,27 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import PageHeading from '../components/ui/PageHeading'
 import Icon from '../components/ui/Icon'
-import type { UserProfile } from '../types'
-import { useLivePrices } from '../features/market/useLivePrices'
+import type { Page, UserProfile } from '../types'
+import { apiBaseUrl } from '../config/api'
 import LiveRatesConverterCard from '../features/market/LiveRatesConverterCard'
-import { getCryptoIcon, PriceTrendBadge } from '../features/market/CryptoIcons'
+import { getCryptoIcon } from '../features/market/CryptoIcons'
 
 interface WalletPageProps {
   userProfile?: UserProfile
+  onNavigate?: (page: Page) => void
 }
 
-export default function WalletPage({ userProfile }: WalletPageProps = {}) {
+type WalletSnapshot = {
+  address: string
+  chainId: number
+  balanceEth: string
+  balanceUsdc: string | null
+  usdcAddress: string | null
+}
+
+export default function WalletPage({ userProfile, onNavigate }: WalletPageProps = {}) {
   // Privacy mode: Hide balances by default for security / shoulder-surfing protection
   const [hideBalances, setHideBalances] = useState(true)
 
@@ -21,77 +30,79 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
   const [copied, setCopied] = useState(false)
   const [cardFinish, setCardFinish] = useState<'obsidian' | 'emerald' | 'titanium'>('obsidian')
 
-  // Modals
+  // Receive modal
   const [showReceiveModal, setShowReceiveModal] = useState(false)
-  const [showSendModal, setShowSendModal] = useState(false)
+  const [wallet, setWallet] = useState<WalletSnapshot | null>(null)
+  const [walletLoading, setWalletLoading] = useState(true)
+  const [walletError, setWalletError] = useState('')
 
-  // Synced User & Wallet data
-  const walletAddress = userProfile?.walletAddress || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F'
-  const displayCardName = userProfile?.cardName || (userProfile?.name ? `${userProfile.name.toUpperCase()} · OWNER` : 'MAYES · OWNER')
+  useEffect(() => {
+    const controller = new AbortController()
+    async function loadWallet() {
+      try {
+        const response = await fetch(`${apiBaseUrl}/wallet/balance`, { signal: controller.signal })
+        const payload = await response.json() as WalletSnapshot & { error?: string }
+        if (!response.ok) throw new Error(payload.error || `Wallet API returned ${response.status}`)
+        if (
+          typeof payload.address !== 'string' ||
+          typeof payload.chainId !== 'number' ||
+          typeof payload.balanceEth !== 'string' ||
+          !(typeof payload.balanceUsdc === 'string' || payload.balanceUsdc === null)
+        ) throw new Error('Wallet API returned an invalid snapshot.')
+        setWallet(payload)
+        setWalletError('')
+      } catch (loadError) {
+        if (controller.signal.aborted) return
+        setWalletError(loadError instanceof Error ? loadError.message : 'Unable to load wallet data.')
+      } finally {
+        if (!controller.signal.aborted) setWalletLoading(false)
+      }
+    }
+    void loadWallet()
+    return () => controller.abort()
+  }, [])
+
+  const walletAddress = wallet?.address || ''
+  const chainLabel = wallet ? `Chain ${wallet.chainId}` : 'Network unavailable'
+  const displayCardName = userProfile?.cardName || (userProfile?.name ? `${userProfile.name.toUpperCase()} · OWNER` : 'Connected signer')
+  const balanceEth = wallet?.balanceEth ?? '—'
+  const balanceUsdc = wallet?.balanceUsdc ?? null
 
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // ignore
+    } catch (error) {
+      setWalletError(error instanceof Error ? `Unable to copy address: ${error.message}` : 'Unable to copy address.')
     }
   }
-
-  const { prices } = useLivePrices(15000)
-  const ethPrice = prices.ETH?.price || 2435.50
-  const ethChange = prices.ETH?.change24h != null
-    ? `${prices.ETH.change24h >= 0 ? '+' : ''}${prices.ETH.change24h.toFixed(1)}%`
-    : '+3.2%'
-
-  const ethBalanceNum = 1.2846
-  const usdcBalanceNum = 264.48
-  const stEthBalanceNum = 0.1500
-
-  const ethVal = ethBalanceNum * ethPrice
-  const stEthVal = stEthBalanceNum * ethPrice
-  const totalBalanceVal = ethVal + usdcBalanceNum + stEthVal
 
   const tokens = [
     {
       symbol: 'ETH',
-      name: 'Sepolia Ether',
-      balance: '1.2846',
-      value: `$${ethVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      change: ethChange,
-      color: 'bg-lime-50 dark:bg-lime-950/50 text-[#65A30D] dark:text-lime-400',
-      mark: 'Ξ',
+      name: `${chainLabel} native asset`,
+      balance: balanceEth,
       contract: 'Native Asset',
     },
-    {
+    ...(balanceUsdc !== null ? [{
       symbol: 'USDC',
       name: 'USD Coin',
-      balance: '264.48',
-      value: '$264.48',
-      change: '0.0%',
-      color: 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400',
-      mark: '＄',
-      contract: '0x1c7D...9373',
-    },
-    {
-      symbol: 'stETH',
-      name: 'Lido Staked Ether',
-      balance: '0.1500',
-      value: `$${stEthVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      change: ethChange,
-      color: 'bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400',
-      mark: '⚡',
-      contract: '0xae7a...B04e',
-    },
+      balance: balanceUsdc,
+      contract: wallet?.usdcAddress || 'Token contract unavailable',
+    }] : []),
   ]
+
+  const groupedAddress = walletAddress
+    ? `0x${walletAddress.slice(2).match(/.{1,4}/g)?.join(' ')}`
+    : 'Wallet address unavailable'
 
   return (
     <>
       <PageHeading
-        eyebrow="Cryptographic Vault · Sepolia Testnet"
-        title="Wallet & Smart Account"
-        description="Inspect guarded agent assets, signer keys, and safe balances protected by on-chain policies."
+        eyebrow={`Cryptographic Vault · ${chainLabel}`}
+        title="Wallet & Signer"
+        description="Inspect live balances and the connected signing wallet protected by backend policy."
         action={
           <div className="flex items-center gap-2.5">
             {/* Global Privacy Toggle (Eye icon) */}
@@ -104,12 +115,13 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
               <span>{hideBalances ? 'Show Balances' : 'Hide Balances'}</span>
             </button>
 
-            <Badge tone="amber">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" /> Sepolia 11155111
+            <Badge tone={wallet ? 'green' : 'amber'}>
+              <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${wallet ? 'bg-lime-500' : 'bg-amber-500'}`} /> {chainLabel}
             </Badge>
           </div>
         }
       />
+      {walletError && <div role="alert" className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{walletError}</div>}
 
       {/* ================= BAMBOOLEAF REALISTIC SMART CARD SECTION ================= */}
       <div className="mb-8 grid gap-6 lg:grid-cols-12 items-start">
@@ -121,7 +133,7 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
           <div className="w-full flex items-center justify-between mb-3 px-1">
             <span className="text-xs font-bold text-slate-500 dark:text-slate-400 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#84CC16]" />
-              Physical Agent Vault Card
+              Connected signer
             </span>
             <div className="flex items-center gap-1.5 p-1 rounded-full bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 text-[11px] font-bold">
               {(['obsidian', 'emerald', 'titanium'] as const).map((finish) => (
@@ -187,7 +199,7 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
                         BAMBOOLEAF
                       </h2>
                       <p className="text-[9px] font-mono tracking-widest text-lime-400/90 font-semibold uppercase">
-                        TITANIUM VAULT · TIER 02
+                        GUARDED WALLET
                       </p>
                     </div>
                   </div>
@@ -197,7 +209,7 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
                 <div className="flex items-center gap-2.5">
                   <div className="text-right hidden sm:block">
                     <p className="text-[8px] font-mono uppercase tracking-widest text-slate-400">Network</p>
-                    <p className="text-[10px] font-mono font-bold text-slate-200">SEPOLIA 11155111</p>
+                    <p className="text-[10px] font-mono font-bold text-slate-200">{chainLabel.toUpperCase()}</p>
                   </div>
 
                   {/* Prismatic Holo Foil Stamp */}
@@ -247,7 +259,7 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
                 <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/70 border border-slate-700/60 backdrop-blur-md">
                   <span className="w-1.5 h-1.5 rounded-full bg-lime-400 animate-pulse" />
                   <span className="text-[10px] font-mono tracking-wider text-slate-200 uppercase font-semibold">
-                    Autonomous Safe
+                    Policy guarded
                   </span>
                 </div>
               </div>
@@ -256,7 +268,7 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
               <div className="relative z-10 mt-1 mb-2">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[8px] sm:text-[9px] font-mono tracking-[0.2em] uppercase text-slate-400">
-                    ACCOUNT SIGNER KEY · ERC-4337
+                    CONNECTED WALLET ADDRESS
                   </span>
                   
                   {/* Inline Mask/Reveal & Copy Controls */}
@@ -272,6 +284,7 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
 
                     <button
                       onClick={() => copyToClipboard(walletAddress)}
+                      disabled={!walletAddress}
                       className="inline-flex items-center gap-1 text-[10px] font-mono text-slate-300 hover:text-white transition px-2 py-0.5 rounded-md hover:bg-white/10"
                       title="Copy full address"
                     >
@@ -284,14 +297,10 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
                 {/* Laser-etched Monospace Card Number (in 4-char chunks) */}
                 <div className="font-mono text-xs sm:text-[15px] tracking-[0.16em] sm:tracking-[0.22em] font-semibold text-slate-100 select-all drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] py-1 flex items-center flex-wrap gap-x-2">
                   {showFullAddress ? (
-                    <span>0x71C7 656E C7AB 88B0 98DE FB75 1B74 01B5 F6D8 976F</span>
+                    <span>{groupedAddress}</span>
                   ) : (
                     <span className="flex items-center gap-1.5 sm:gap-2">
-                      <span>0x71C7</span>
-                      <span className="tracking-[0.3em] text-slate-300 font-bold">••••</span>
-                      <span className="tracking-[0.3em] text-slate-300 font-bold">••••</span>
-                      <span className="tracking-[0.3em] text-slate-300 font-bold">••••</span>
-                      <span>976F</span>
+                      <span>{walletAddress ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}` : 'Wallet not connected'}</span>
                     </span>
                   )}
                 </div>
@@ -306,18 +315,13 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
                   </p>
                 </div>
 
-                <div className="hidden sm:block text-center">
-                  <p className="text-[8px] font-mono uppercase tracking-[0.2em] text-slate-400">Valid Thru</p>
-                  <p className="text-xs font-mono font-bold tracking-widest text-slate-300">12 / 29</p>
-                </div>
-
                 <div className="text-right">
-                  <p className="text-[8px] font-mono uppercase tracking-[0.2em] text-slate-400">Guarded Balance</p>
+                  <p className="text-[8px] font-mono uppercase tracking-[0.2em] text-slate-400">Wallet Balance</p>
                   <p className="text-sm sm:text-base font-mono font-extrabold text-white tracking-tight drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]">
                     {hideBalances ? (
                       <span className="tracking-[0.25em] text-slate-300 font-bold">••••••••</span>
                     ) : (
-                      <span>${totalBalanceVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-[10px] font-normal text-slate-400">USD</span></span>
+                      <span>{balanceEth} ETH · {balanceUsdc ?? '—'} USDC</span>
                     )}
                   </p>
                 </div>
@@ -340,7 +344,7 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
 
               <div className="grid grid-cols-2 gap-2.5">
                 <button
-                  onClick={() => setShowSendModal(true)}
+                  onClick={() => onNavigate?.('chat')}
                   className="flex items-center gap-2 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-left group"
                 >
                   <div className="w-8 h-8 rounded-xl bg-lime-100 dark:bg-lime-950/60 text-[#65A30D] dark:text-lime-400 grid place-items-center shrink-0">
@@ -348,7 +352,7 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
                   </div>
                   <div>
                     <p className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-[#65A30D] dark:group-hover:text-lime-400 transition">Transfer</p>
-                    <p className="text-[10px] text-slate-400">Send assets</p>
+                    <p className="text-[10px] text-slate-400">Open guarded chat</p>
                   </div>
                 </button>
 
@@ -361,24 +365,26 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
                   </div>
                   <div>
                     <p className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-blue-500 transition">Receive</p>
-                    <p className="text-[10px] text-slate-400">QR & Address</p>
+                    <p className="text-[10px] text-slate-400">Wallet address</p>
                   </div>
                 </button>
 
-                <a
-                  href="https://sepoliafaucet.com"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-2 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-left group"
-                >
-                  <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 grid place-items-center shrink-0">
-                    <Icon name="spark" size={14} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-amber-500 transition">Faucet</p>
-                    <p className="text-[10px] text-slate-400">Testnet Sepolia</p>
-                  </div>
-                </a>
+                {wallet?.chainId === 11155111 && (
+                  <a
+                    href="https://sepoliafaucet.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-2 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-left group"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 grid place-items-center shrink-0">
+                      <Icon name="spark" size={14} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-amber-500 transition">Sepolia faucet</p>
+                      <p className="text-[10px] text-slate-400">{chainLabel}</p>
+                    </div>
+                  </a>
+                )}
 
                 <div className="flex items-center gap-2 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-left">
                   <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 grid place-items-center shrink-0">
@@ -386,7 +392,7 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
                   </div>
                   <div>
                     <p className="text-xs font-bold text-slate-900 dark:text-white">Firewall</p>
-                    <p className="text-[10px] text-[#65A30D] dark:text-lime-400 font-bold">100% Guarded</p>
+                    <p className="text-[10px] text-[#65A30D] dark:text-lime-400 font-bold">Backend policy active</p>
                   </div>
                 </div>
               </div>
@@ -397,43 +403,25 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
                 <span className="w-2 h-2 rounded-full bg-lime-500" />
                 Deterministic Guardrails Active
               </span>
-              <span className="font-mono text-[10px] text-slate-400">Gas: 12 Gwei</span>
+              <span className="font-mono text-[10px] text-slate-400">{walletLoading ? 'Loading wallet…' : walletError || 'Balances from connected signer'}</span>
             </div>
           </Card>
         </div>
 
       </div>
 
-      {/* ================= PORTFOLIO METRICS ================= */}
       <div className="mb-6 grid gap-4 md:grid-cols-3">
-        <Card className="p-5">
-          <div className="flex justify-between items-start">
-            <p className="text-xs font-bold text-slate-400">Total portfolio value</p>
-            <button
-              onClick={() => setHideBalances((prev) => !prev)}
-              className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition"
-              aria-label="Toggle portfolio value visibility"
-            >
-              <Icon name={hideBalances ? 'eye' : 'eyeOff'} size={14} />
-            </button>
-          </div>
-          <p className="mt-2 text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight font-mono">
-            {hideBalances ? '••••••••' : '$2,840.60'}
-          </p>
-          <p className="mt-1 text-xs text-slate-400">Sepolia testnet valuation</p>
-        </Card>
-
-        <Card className="p-5">
-          <p className="text-xs font-bold text-slate-400">Target allocation</p>
-          <p className="mt-2 text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">60 / 40</p>
-          <p className="mt-1 text-xs text-slate-400">ETH / USDC target split</p>
-        </Card>
-
-        <Card className="p-5">
-          <p className="text-xs font-bold text-slate-400">Drift from target</p>
-          <p className="mt-2 text-3xl font-extrabold text-[#65A30D] dark:text-lime-400 tracking-tight">+2.4%</p>
-          <p className="mt-1 text-xs text-slate-400">Inside configured rebalance band</p>
-        </Card>
+        {[
+          { label: 'Native balance', value: `${balanceEth} ETH` },
+          { label: 'USDC balance', value: balanceUsdc === null ? 'Not available on this chain' : `${balanceUsdc} USDC` },
+          { label: 'Connected network', value: chainLabel },
+        ].map((item) => (
+          <Card key={item.label} className="p-5">
+            <p className="text-xs font-bold text-slate-400">{item.label}</p>
+            <p className="mt-2 break-all text-xl font-extrabold text-slate-900 dark:text-white">{walletLoading ? 'Loading…' : item.value}</p>
+            <p className="mt-1 text-xs text-slate-400">{walletError ? 'Wallet data unavailable' : 'Read from configured signer and RPC'}</p>
+          </Card>
+        ))}
       </div>
 
       {/* ================= TOKEN ASSETS LIST ================= */}
@@ -441,7 +429,7 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
         <div className="p-6 border-b border-slate-100 dark:border-slate-800/80 flex justify-between items-center">
           <div>
             <h2 className="text-base font-bold text-slate-900 dark:text-white">Assets in Safe</h2>
-            <p className="text-xs text-slate-400">Live token balances and estimated dollar valuation</p>
+            <p className="text-xs text-slate-400">Live token balances from the connected chain</p>
           </div>
           <button
             onClick={() => setHideBalances((prev) => !prev)}
@@ -475,14 +463,7 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
                   {hideBalances ? `•••• ${token.symbol}` : `${token.balance} ${token.symbol}`}
                 </p>
                 <p className="text-xs text-slate-400 mt-0.5 font-mono">
-                  {hideBalances ? (
-                    '•••• USD'
-                  ) : (
-                    <span className="inline-flex items-center gap-2">
-                      <span>{token.value}</span>
-                      <PriceTrendBadge change={parseFloat(token.change) || 0} size="sm" />
-                    </span>
-                  )}
+                  {hideBalances ? '••••' : token.contract}
                 </p>
               </div>
             </div>
@@ -499,8 +480,8 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
           <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-sm w-full border border-slate-200 dark:border-slate-800 shadow-2xl p-6 animate-in fade-in zoom-in-95 space-y-4">
             <div className="flex justify-between items-center">
               <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">Receive Sepolia Assets</h3>
-                <p className="text-xs text-slate-400">Deposit testnet tokens to Safe</p>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Receive assets</h3>
+                <p className="text-xs text-slate-400">Copy this wallet address to receive assets on {chainLabel}.</p>
               </div>
               <button
                 onClick={() => setShowReceiveModal(false)}
@@ -510,37 +491,16 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
               </button>
             </div>
 
-            {/* Mock QR Code graphic */}
-            <div className="p-4 bg-white rounded-2xl border border-slate-200 flex flex-col items-center justify-center shadow-inner">
-              <div className="w-44 h-44 bg-slate-900 rounded-xl p-3 flex flex-col items-center justify-center space-y-2 relative overflow-hidden">
-                <div className="grid grid-cols-4 gap-2 w-32 h-32 opacity-90">
-                  {Array.from({ length: 16 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className={`rounded-sm ${
-                        i % 5 === 0 || i === 3 || i === 10 || i === 15 ? 'bg-lime-400' : 'bg-white'
-                      }`}
-                    />
-                  ))}
-                </div>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-10 h-10 rounded-xl bg-white text-slate-950 font-bold flex items-center justify-center shadow-lg border border-slate-200 text-sm">
-                    🌿
-                  </div>
-                </div>
-              </div>
-              <p className="text-[10px] text-slate-500 font-mono mt-2">Sepolia Multi-Sig Vault</p>
-            </div>
-
             {/* Address copy block */}
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Safe Address</label>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Wallet Address</label>
               <div className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
                 <span className="font-mono text-xs text-slate-800 dark:text-slate-200 truncate flex-1 select-all">
-                  {walletAddress}
+                  {walletAddress || (walletLoading ? 'Loading wallet address…' : 'Wallet address unavailable')}
                 </span>
                 <button
                   onClick={() => copyToClipboard(walletAddress)}
+                  disabled={!walletAddress}
                   className="px-2.5 py-1 rounded-lg bg-lime-400 text-slate-950 font-bold text-xs hover:bg-lime-300 transition shrink-0"
                 >
                   {copied ? 'Copied!' : 'Copy'}
@@ -558,84 +518,6 @@ export default function WalletPage({ userProfile }: WalletPageProps = {}) {
         </div>
       )}
 
-      {/* ================= SEND MODAL ================= */}
-      {showSendModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl p-6 animate-in fade-in zoom-in-95 space-y-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">Initiate Guarded Transfer</h3>
-                <p className="text-xs text-slate-400">All transfers are checked against active BambooLeaf policies</p>
-              </div>
-              <button
-                onClick={() => setShowSendModal(false)}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-              >
-                <Icon name="close" size={16} />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Recipient Address</label>
-                <input
-                  type="text"
-                  placeholder="0x... or ENS handle"
-                  className="mt-1 w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#84CC16]"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Asset</label>
-                  <select className="mt-1 w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#84CC16]">
-                    <option>ETH (Sepolia)</option>
-                    <option>USDC</option>
-                    <option>stETH</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Amount</label>
-                  <input
-                    type="text"
-                    placeholder="0.0"
-                    className="mt-1 w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#84CC16]"
-                  />
-                </div>
-              </div>
-
-              {/* Policy Guard Check Notice */}
-              <div className="p-3 rounded-2xl bg-lime-50 dark:bg-lime-950/40 border border-lime-200 dark:border-lime-900/60 flex items-start gap-2.5 text-xs">
-                <Icon name="shield" size={16} className="text-[#65A30D] dark:text-lime-400 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold text-slate-900 dark:text-white">Auto-Tier Evaluation</p>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    Transfers under $20 USD are processed autonomously (Tier 1). Larger transfers will require co-signer 2FA approval.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                onClick={() => setShowSendModal(false)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-bold transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  alert('Transfer proposed to BambooLeaf policy engine!')
-                  setShowSendModal(false)
-                }}
-                className="flex-1 py-2.5 rounded-xl bg-[#65A30D] hover:bg-[#558b09] dark:bg-lime-400 dark:hover:bg-lime-300 text-white dark:text-slate-950 text-xs font-bold transition shadow-sm"
-              >
-                Submit Transfer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }
