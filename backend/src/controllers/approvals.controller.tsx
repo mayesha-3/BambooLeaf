@@ -1,63 +1,80 @@
+import { getAddress } from 'ethers'
 import { getDatabase } from '../db/connection.tsx'
-import { approveGoal } from '../services/goals.service.tsx'
-import { appendAuditEvent } from '../audit/audit-log.tsx'
-import { COLLECTIONS } from '../db/collections.tsx'
+import {
+  ApprovalError,
+  approveTransfer,
+  getPendingApprovals,
+  rejectTransferApproval,
+} from '../services/approvals.service.tsx'
 
-export async function approve(request, response, next) {
+const approvalIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function authenticatedOwner(request, response) {
+  const configuredOwner = process.env.OWNER_WALLET_ADDRESS
+  const authenticatedWallet = request.deviceSession?.walletAddress
+  if (!configuredOwner || !authenticatedWallet) {
+    response.status(403).json({ error: 'Only the configured owner wallet can manage transaction approvals.' })
+    return null
+  }
   try {
-    const approvalId = request.params.id
-    const result = await approveGoal(getDatabase(), approvalId)
-    response.json(result)
+    const owner = getAddress(configuredOwner).toLowerCase()
+    if (owner !== getAddress(authenticatedWallet).toLowerCase()) {
+      response.status(403).json({ error: 'Only the configured owner wallet can manage transaction approvals.' })
+      return null
+    }
+    return owner
+  } catch {
+    response.status(503).json({ error: 'OWNER_WALLET_ADDRESS is invalid.' })
+    return null
+  }
+}
+
+async function list(request, response, next) {
+  const owner = authenticatedOwner(request, response)
+  if (!owner) return
+  try {
+    response.json({ approvals: await getPendingApprovals(getDatabase(), owner) })
   } catch (error) {
     next(error)
   }
 }
 
-export async function reject(request, response, next) {
+async function approve(request, response, next) {
+  const owner = authenticatedOwner(request, response)
+  if (!owner) return
+  const approvalId = request.params.approvalId
+  if (!approvalIdPattern.test(approvalId)) {
+    response.status(400).json({ error: 'Approval identifier is invalid.' })
+    return
+  }
   try {
-    const approvalId = request.params.id
-    const database = getDatabase()
-    const result = await database.collection(COLLECTIONS.approvals).updateOne(
-      { approvalId, status: 'pending' },
-      { $set: { status: 'rejected', decidedAt: new Date() } }
-    )
-    if (result.matchedCount === 0) {
-      response.status(404).json({ error: 'Approval not found or already processed.' })
+    response.json(await approveTransfer(getDatabase(), approvalId, owner, request.requestId))
+  } catch (error) {
+    if (error instanceof ApprovalError) {
+      response.status(error.statusCode).json({ error: error.message })
       return
     }
-    const approval = await database.collection(COLLECTIONS.approvals).findOne({ approvalId, status: 'rejected' })
-    if (approval) {
-      await database.collection(COLLECTIONS.goals).updateOne(
-        { requestId: approval.requestId },
-        { $set: { approvalStatus: 'rejected', decidedAt: new Date() } }
-      )
-      await appendAuditEvent(database, {
-        requestId: approval.requestId,
-        type: 'approval.rejected',
-        data: { approvalId, tier: approval.tier },
-      })
-    }
-    response.json({ status: 'rejected' })
-  } catch (error) {
     next(error)
   }
 }
 
-export async function listApprovals(request, response, next) {
+async function reject(request, response, next) {
+  const owner = authenticatedOwner(request, response)
+  if (!owner) return
+  const approvalId = request.params.approvalId
+  if (!approvalIdPattern.test(approvalId)) {
+    response.status(400).json({ error: 'Approval identifier is invalid.' })
+    return
+  }
   try {
-    const collection = getDatabase().collection(COLLECTIONS.approvals)
-    const now = Date.now()
-    await collection.updateMany(
-      { status: 'pending', expiresAt: { $lte: now } },
-      { $set: { status: 'expired' } },
-    )
-    const approvals = await collection.find({ status: 'pending', expiresAt: { $gt: now } }).toArray()
-    const serializedApprovals = approvals.map(({ _id, txRequests, ...approval }) => ({
-      ...approval,
-      txRequests: txRequests.map(tx => ({ ...tx, value: tx.value.toString() })),
-    }))
-    response.json({ approvals: serializedApprovals })
+    response.json(await rejectTransferApproval(getDatabase(), approvalId, owner, request.requestId))
   } catch (error) {
+    if (error instanceof ApprovalError) {
+      response.status(error.statusCode).json({ error: error.message })
+      return
+    }
     next(error)
   }
 }
+
+export { approve, list, reject }

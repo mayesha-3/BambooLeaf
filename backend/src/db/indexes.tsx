@@ -4,6 +4,8 @@ async function ensureIndexes(database) {
   await Promise.all([
     database.collection(COLLECTIONS.audit).createIndex({ seq: 1 }, { unique: true }),
     database.collection(COLLECTIONS.audit).createIndex({ requestId: 1, seq: 1 }),
+    database.collection(COLLECTIONS.policyVersions).createIndex({ versionHash: 1 }, { unique: true }),
+    database.collection(COLLECTIONS.policyVersions).createIndex({ createdAt: -1 }),
     database.collection(COLLECTIONS.goals).createIndex({ idempotencyKey: 1 }, { unique: true }),
     database.collection(COLLECTIONS.goals).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     database.collection(COLLECTIONS.approvals).createIndex({ approvalId: 1 }, { unique: true }),

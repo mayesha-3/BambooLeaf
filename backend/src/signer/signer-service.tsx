@@ -2,23 +2,64 @@ import { Contract, JsonRpcProvider, Wallet, parseEther, parseUnits } from 'ether
 import { verifyGuardAuthorization } from '../guard/guard-auth.tsx'
 import { buildErc20Approval, buildNativeTransfer, routerInterface } from '../chain/transaction-builder.tsx'
 import { getToken } from '../chain/token-registry.tsx'
-import { readPolicyConfig } from '../guard/policy-engine.tsx'
+import { evaluateNativeTransfer, readPolicyConfig } from '../guard/policy-engine.tsx'
+import { routeTier } from '../guard/tier-router.tsx'
 import { simulateShadowFork } from '../chain/simulator.tsx'
 import { checkIntentOutcome } from '../guard/intent-outcome-checker.tsx'
-import { transactionDigest, verifyTransactionDigest, computeApprovalDigest } from './approval-digest.tsx'
-import { requireKillSwitchOff } from '../guard/autonomy-manager.tsx'
+import { transactionDigest, verifyTransactionDigest } from './approval-digest.tsx'
+import { getLevel, requireKillSwitchOff } from '../guard/autonomy-manager.tsx'
 import { nextNonce, resetNonceCache } from './nonce-manager.tsx'
-import type { TxRequest } from '../chain/transaction-builder.tsx'
 
-let provider: JsonRpcProvider | undefined
-let wallet: Wallet | undefined
+let provider
+let wallet
 let sendQueue = Promise.resolve()
 
-export function getSigner(ctx?: any) {
-  if (ctx?.provider && ctx?.wallet) return { provider: ctx.provider, wallet: ctx.wallet }
-  
-  if (!process.env.AGENT_KEY) throw new Error('AGENT_KEY is not configured; refusing to sign')
-  if (!process.env.RPC_URL) throw new Error('RPC_URL is not configured; refusing to sign')
+function assertNativeAutoExecutable(intent, policy, hasHumanApproval = false) {
+  const decision = evaluateNativeTransfer(intent, policy)
+  if (!decision.allowed) {
+    throw new Error(`Signer re-verification rejected transfer: ${decision.reason}`)
+  }
+  const tier = routeTier({
+    intent,
+    allowedRecipients: policy.allowedRecipients,
+    allowedContracts: policy.allowedContracts,
+    maxPerTxWei: policy.maxPerTxWei,
+    valueWei: BigInt(decision.valueWei),
+    riskScore: 0,
+    forbiddenPatterns: [],
+    autonomyLevel: getLevel(),
+  })
+  if (tier.tier !== 'T1' && !(tier.tier === 'T2' && hasHumanApproval)) {
+    throw new Error(`Signer re-verification requires ${tier.tier}: ${tier.reasons.join('; ')}`)
+  }
+  return tier
+}
+
+function assertSwapAutoExecutable(intent, swap, policy) {
+  const cap = parseUnits(policy.maxSwapInputAmount, swap.tokenIn.decimals)
+  const tier = routeTier({
+    intent,
+    allowedRecipients: policy.allowedRecipients,
+    allowedContracts: new Set([...policy.allowedContracts, ...policy.allowedSwapRouters]),
+    targetContract: swap.router,
+    maxPerTxWei: cap,
+    valueWei: swap.amountIn,
+    riskScore: 0,
+    forbiddenPatterns: [],
+    autonomyLevel: getLevel(),
+  })
+  if (tier.tier !== 'T1') {
+    throw new Error(`Signer re-verification requires ${tier.tier}: ${tier.reasons.join('; ')}`)
+  }
+}
+
+function getSigner() {
+  if (!process.env.AGENT_KEY) {
+    throw new Error('AGENT_KEY is not configured; refusing to sign')
+  }
+  if (!process.env.RPC_URL) {
+    throw new Error('RPC_URL is not configured; refusing to sign')
+  }
   if (!provider) {
     provider = new JsonRpcProvider(process.env.RPC_URL)
     wallet = new Wallet(process.env.AGENT_KEY, provider)
@@ -26,14 +67,14 @@ export function getSigner(ctx?: any) {
   return { provider, wallet }
 }
 
-export function getSignerAddress() {
-  if (!process.env.AGENT_KEY) throw new Error('AGENT_KEY is not configured')
+function getSignerAddress() {
+  if (!process.env.AGENT_KEY) {
+    throw new Error('AGENT_KEY is not configured; refusing to authorize a swap')
+  }
   return new Wallet(process.env.AGENT_KEY).address
 }
 
-// ------------------ Original Transfer/Swap Validations ------------------
-
-function validateAuthorizedSwap(intent: any, authorization: any, signerAddress: string, chainId: number, config: any) {
+function validateAuthorizedSwap(intent, authorization, signerAddress, chainId, config) {
   const router = config.swapRouterAddress
   if (!router || !config.allowedSwapRouters.has(router)) {
     throw new Error('Swap router is not configured and allow-listed')
@@ -81,14 +122,88 @@ function validateAuthorizedSwap(intent: any, authorization: any, signerAddress: 
   if (!verifyGuardAuthorization(authorization, authorizationPayload)) {
     throw new Error('Guard authorization is invalid or expired')
   }
-  return { router, tokenIn, tokenOut, amountIn, minAmountOut: BigInt(minAmountOut) }
+  return {
+    router,
+    tokenIn,
+    tokenOut,
+    amountIn,
+    minAmountOut: BigInt(minAmountOut),
+  }
 }
 
-// ------------------ Original Native Transfer ------------------
+async function getSwapApprovalTransactions(provider, signerAddress, swap) {
+  const allowanceContract = new Contract(
+    swap.tokenIn.address,
+    ['function allowance(address owner, address spender) view returns (uint256)'],
+    provider,
+  )
+  const allowance = BigInt(await allowanceContract.allowance(signerAddress, swap.router))
+  if (allowance >= swap.amountIn) return []
+  return [
+    ...(allowance > 0n ? [buildErc20Approval(swap.tokenIn.address, swap.router, 0n)] : []),
+    buildErc20Approval(swap.tokenIn.address, swap.router, swap.amountIn),
+  ]
+}
 
-export function sendAuthorizedNativeTransfer(intent: any, authorization: any) {
+async function simulateAuthorizedSwap(intent, authorization) {
+  requireKillSwitchOff()
+  const forkUrl = process.env.SHADOW_RPC_URL
+  if (!forkUrl) throw new Error('SHADOW_FORK_RPC_URL must point to a local Anvil fork before swaps can execute')
+  const signerAddress = getSignerAddress()
+  const config = readPolicyConfig()
+  const fork = new JsonRpcProvider(forkUrl)
+  try {
+    const network = await fork.getNetwork()
+    const swap = validateAuthorizedSwap(intent, authorization, signerAddress, Number(network.chainId), config)
+    const approvals = await getSwapApprovalTransactions(fork, signerAddress, swap)
+    const simulation = await simulateShadowFork(
+      fork,
+      signerAddress,
+      [...approvals, {
+        to: swap.router,
+        value: 0n,
+        data: authorization.transactionData,
+      }],
+      {
+        accounts: [signerAddress],
+        tokenAddresses: [swap.tokenIn.address, swap.tokenOut.address],
+      },
+    )
+    if (!simulation.success) {
+      throw new Error(`Shadow-fork simulation failed: ${simulation.error}`)
+    }
+    const balanceKey = `${swap.tokenOut.address.toLowerCase()}:${signerAddress.toLowerCase()}`
+    const inputKey = `${swap.tokenIn.address.toLowerCase()}:${signerAddress.toLowerCase()}`
+    const outputDelta = BigInt(simulation.balanceDeltas[balanceKey] ?? 0n)
+    const inputDelta = BigInt(simulation.balanceDeltas[inputKey] ?? 0n)
+    const outcome = {
+      success: true,
+      amountSent: inputDelta < 0n ? -inputDelta : 0n,
+      expectedAmountSent: swap.amountIn,
+      tokenReceived: intent.to.token,
+      amountReceived: outputDelta > 0n ? outputDelta : 0n,
+      minAmountOut: swap.minAmountOut,
+      expectedRouter: swap.router,
+      maxApprovalAmount: swap.amountIn,
+      approvals: simulation.events
+        .filter((event) => event.type === 'Approval' && event.owner.toLowerCase() === signerAddress.toLowerCase())
+        .map((event) => ({ spender: event.spender, amount: event.value })),
+      contractsCalled: simulation.calledAddresses,
+    }
+    const comparison = checkIntentOutcome(intent, outcome)
+    if (!comparison.passed) {
+      throw new Error(`Intent/outcome check failed: ${comparison.reasons.join('; ')}`)
+    }
+    return { ...simulation, comparison, amountIn: swap.amountIn.toString(), minAmountOut: swap.minAmountOut.toString() }
+  } finally {
+    await fork.destroy()
+  }
+}
+
+function sendAuthorizedNativeTransfer(intent, authorization) {
   requireKillSwitchOff()
   const operation = sendQueue.then(async () => {
+    requireKillSwitchOff()
     const tx = buildNativeTransfer(intent)
     const authPayload = {
       chainId: intent.chainId,
@@ -103,19 +218,36 @@ export function sendAuthorizedNativeTransfer(intent: any, authorization: any) {
     const { provider: rpc, wallet: signer } = getSigner()
     const network = await rpc.getNetwork()
     const chainId = Number(network.chainId)
-    
+    if (chainId !== Number(process.env.CHAIN_ID || 31337) || chainId !== intent.chainId) {
+      throw new Error('Connected chain ID does not match the configured policy chain')
+    }
+    const policy = readPolicyConfig()
+    const tier = assertNativeAutoExecutable(intent, policy, typeof authorization.approvedDigest === 'string')
+
     const nonce = await nextNonce(rpc, signer)
     const expiresAt = authorization.expiresAt
     const digest = transactionDigest({
-      chainId, to: tx.to, value: tx.value, data: tx.data, nonce, expiresAt,
+      chainId,
+      to: tx.to,
+      value: tx.value,
+      data: tx.data,
+      nonce,
+      expiresAt,
     })
 
+    // --- Digest Verify check ---
+    if (tier.tier === 'T2' && !authorization.approvedDigest) {
+      throw new Error('Signer re-verification requires a human-approved transaction digest')
+    }
     if (authorization.approvedDigest) {
       const isValid = verifyTransactionDigest(authorization.approvedDigest, {
         chainId, to: tx.to, value: tx.value, data: tx.data, nonce, expiresAt
       })
-      if (!isValid) throw new Error('Security Alert: Transaction digest mismatch!')
+      if (!isValid) {
+        throw new Error('Security Alert: Transaction digest mismatch! Possible tampering detected.')
+      }
     }
+    // ---------------------------------
 
     const balance = await rpc.getBalance(signer.address)
     const maxBalance = process.env.MAX_AGENT_BALANCE
@@ -123,30 +255,55 @@ export function sendAuthorizedNativeTransfer(intent: any, authorization: any) {
       throw new Error('Signer balance exceeds the configured hard balance ceiling')
     }
 
+    requireKillSwitchOff()
+    if (!verifyGuardAuthorization(authorization, authPayload)) {
+      throw new Error('Guard authorization expired or changed before signing')
+    }
+    if (Number((await rpc.getNetwork()).chainId) !== chainId) {
+      throw new Error('Connected chain changed before signing')
+    }
+    const finalTier = assertNativeAutoExecutable(
+      intent,
+      readPolicyConfig(),
+      typeof authorization.approvedDigest === 'string',
+    )
+    if (finalTier.tier === 'T2' && !authorization.approvedDigest) {
+      throw new Error('Signer re-verification requires a human-approved transaction digest')
+    }
+    if (Number(await rpc.getTransactionCount(signer.address, 'pending')) !== nonce) {
+      throw new Error('Signer nonce changed after approval; transaction must be reviewed again')
+    }
     const response = await signer.sendTransaction({
-      ...tx, chainId, nonce, gasLimit: 21000,
+      ...tx,
+      chainId,
+      nonce,
+      gasLimit: 21000,
     })
     const receipt = await response.wait()
-    if (!receipt || receipt.status !== 1) throw new Error('Transaction was not confirmed successfully')
+    if (!receipt || receipt.status !== 1) {
+      throw new Error('Transaction was not confirmed successfully')
+    }
     return { txHash: receipt.hash, status: 'confirmed', digest }
   })
 
-  operation.catch(() => resetNonceCache())
+  operation.catch(() => {
+    resetNonceCache()
+  })
   sendQueue = operation.then(() => undefined, () => undefined)
   return operation
 }
 
-// ------------------ Original Swap Execution ------------------
-
-export function sendAuthorizedSwap(intent: any, authorization: any) {
+function sendAuthorizedSwap(intent, authorization) {
   requireKillSwitchOff()
   const operation = sendQueue.then(async () => {
+    requireKillSwitchOff()
     const { provider: rpc, wallet: signer } = getSigner()
     const config = readPolicyConfig()
     const network = await rpc.getNetwork()
     const chainId = Number(network.chainId)
     const swap = validateAuthorizedSwap(intent, authorization, signer.address, chainId, config)
     const { router, tokenIn, amountIn, minAmountOut } = swap
+    assertSwapAutoExecutable(intent, swap, config)
 
     const allowanceContract = new Contract(
       tokenIn.address,
@@ -155,30 +312,42 @@ export function sendAuthorizedSwap(intent: any, authorization: any) {
     )
     let allowance = BigInt(await allowanceContract.allowance(signer.address, router))
     const digests = []
+    const approvalTxHashes = []
     
-    const sendApproval = async ({ to, value, data }: any) => {
+    const sendApproval = async ({ to, value, data }) => {
+      requireKillSwitchOff()
+      const currentConfig = readPolicyConfig()
+      const currentSwap = validateAuthorizedSwap(intent, authorization, signer.address, Number((await rpc.getNetwork()).chainId), currentConfig)
+      assertSwapAutoExecutable(intent, currentSwap, currentConfig)
       const nonce = await nextNonce(rpc, signer)
       const digest = transactionDigest({
         chainId, to, value, data, nonce, expiresAt: authorization.expiresAt,
       })
+
+      // ---Digest Verify check(Approval) ---
       if (authorization.approvedApprovalDigest) {
          const isValid = verifyTransactionDigest(authorization.approvedApprovalDigest, {
            chainId, to, value, data, nonce, expiresAt: authorization.expiresAt
          })
          if (!isValid) throw new Error('Security Alert: Approval digest mismatch!')
       }
-      const response = await signer.sendTransaction({ to, value, data, chainId, nonce })
+      // -----------------------------------------
+
+      if (Number(await rpc.getTransactionCount(signer.address, 'pending')) !== nonce) {
+        throw new Error('Signer nonce changed before ERC-20 approval could be sent')
+      }
+      requireKillSwitchOff()
+      const response = await signer.sendTransaction({
+        to, value, data, chainId, nonce,
+      })
       const receipt = await response.wait()
       if (!receipt || receipt.status !== 1) throw new Error('ERC-20 approval was not confirmed')
       digests.push(digest)
+      approvalTxHashes.push(receipt.hash)
     }
     
     if (allowance < amountIn) {
-      const approvals = [
-        ...(allowance > 0n ? [buildErc20Approval(tokenIn.address, router, 0n)] : []),
-        buildErc20Approval(tokenIn.address, router, amountIn),
-      ]
-      for (const approval of approvals) {
+      for (const approval of await getSwapApprovalTransactions(rpc, signer.address, swap)) {
         await sendApproval(approval)
       }
       allowance = BigInt(await allowanceContract.allowance(signer.address, router))
@@ -187,24 +356,63 @@ export function sendAuthorizedSwap(intent: any, authorization: any) {
 
     const nonce = await nextNonce(rpc, signer)
     const digest = transactionDigest({
-      chainId, to: router, value: 0n, data: authorization.transactionData, nonce, expiresAt: authorization.expiresAt,
+      chainId,
+      to: router,
+      value: 0n,
+      data: authorization.transactionData,
+      nonce,
+      expiresAt: authorization.expiresAt,
     })
 
+    // --- Digest Verify check---
     if (authorization.approvedDigest) {
       const isValid = verifyTransactionDigest(authorization.approvedDigest, {
         chainId, to: router, value: 0n, data: authorization.transactionData, nonce, expiresAt: authorization.expiresAt
       })
-      if (!isValid) throw new Error('Security Alert: Swap digest mismatch!')
+      if (!isValid) {
+        throw new Error('Security Alert: Swap digest mismatch! Possible tampering detected.')
+      }
     }
+    // -----------------------------------------
 
+    requireKillSwitchOff()
+    const finalConfig = readPolicyConfig()
+    const finalSwap = validateAuthorizedSwap(intent, authorization, signer.address, Number((await rpc.getNetwork()).chainId), finalConfig)
+    assertSwapAutoExecutable(intent, finalSwap, finalConfig)
+    if (finalSwap.router.toLowerCase() !== router.toLowerCase() ||
+        finalSwap.amountIn !== amountIn ||
+        finalSwap.minAmountOut !== minAmountOut ||
+        !verifyGuardAuthorization(authorization, {
+          chainId,
+          intentId: intent.intentId,
+          recipient: signer.address,
+          valueWei: '0',
+          transactionTo: router,
+          transactionData: authorization.transactionData,
+        })) {
+      throw new Error('Swap authorization changed before signing')
+    }
+    if (Number(await rpc.getTransactionCount(signer.address, 'pending')) !== nonce) {
+      throw new Error('Signer nonce changed after swap approval; transaction must be reviewed again')
+    }
     const response = await signer.sendTransaction({
-      to: router, value: 0n, data: authorization.transactionData, chainId, nonce,
+      to: router,
+      value: 0n,
+      data: authorization.transactionData,
+      chainId,
+      nonce,
     })
     const receipt = await response.wait()
     if (!receipt || receipt.status !== 1) throw new Error('Swap transaction was not confirmed successfully')
     return {
-      txHash: receipt.hash, status: 'confirmed', digest, approvalDigests: digests,
-      amountIn: amountIn.toString(), minAmountOut: BigInt(minAmountOut).toString(), logs: receipt.logs,
+      txHash: receipt.hash,
+      status: 'confirmed',
+      digest,
+      approvalDigests: digests,
+      approvalTxHashes,
+      amountIn: amountIn.toString(),
+      minAmountOut: BigInt(minAmountOut).toString(),
+      logs: receipt.logs,
     }
   })
   operation.catch(() => resetNonceCache())
@@ -212,117 +420,12 @@ export function sendAuthorizedSwap(intent: any, authorization: any) {
   return operation
 }
 
-// ------------------ Original Shadow Simulation ------------------
-
-export async function simulateAuthorizedSwap(intent: any, authorization: any) {
-  requireKillSwitchOff()
-  const forkUrl = process.env.SHADOW_RPC_URL
-  if (!forkUrl) throw new Error('SHADOW_RPC_URL must point to a local Anvil fork before swaps can execute')
-  const signerAddress = getSignerAddress()
-  const config = readPolicyConfig()
-  const fork = new JsonRpcProvider(forkUrl)
-  
-  try {
-    const network = await fork.getNetwork()
-    const swap = validateAuthorizedSwap(intent, authorization, signerAddress, Number(network.chainId), config)
-    
-    const allowanceContract = new Contract(swap.tokenIn.address, ['function allowance(address owner, address spender) view returns (uint256)'], fork)
-    const allowance = BigInt(await allowanceContract.allowance(signerAddress, swap.router))
-    const approvals = allowance < swap.amountIn 
-      ? [...(allowance > 0n ? [buildErc20Approval(swap.tokenIn.address, swap.router, 0n)] : []), buildErc20Approval(swap.tokenIn.address, swap.router, swap.amountIn)]
-      : []
-
-    const simulation = await simulateShadowFork(
-      fork, signerAddress,
-      [...approvals, { to: swap.router, value: 0n, data: authorization.transactionData }],
-      { accounts: [signerAddress], tokenAddresses: [swap.tokenIn.address, swap.tokenOut.address] }
-    )
-    
-    if (!simulation.success) throw new Error(`Shadow-fork simulation failed: ${simulation.error}`)
-    
-    const balanceKey = `${swap.tokenOut.address.toLowerCase()}:${signerAddress.toLowerCase()}`
-    const inputKey = `${swap.tokenIn.address.toLowerCase()}:${signerAddress.toLowerCase()}`
-    const outputDelta = BigInt(simulation.balanceDeltas[balanceKey] ?? 0n)
-    const inputDelta = BigInt(simulation.balanceDeltas[inputKey] ?? 0n)
-    
-    const outcome = {
-      success: true,
-      amountSent: inputDelta < 0n ? -inputDelta : 0n,
-      expectedAmountSent: swap.amountIn,
-      tokenReceived: intent.to.token,
-      amountReceived: outputDelta > 0n ? outputDelta : 0n,
-      minAmountOut: swap.minAmountOut,
-      expectedRouter: swap.router,
-      maxApprovalAmount: swap.amountIn,
-      approvals: simulation.events
-        .filter((event: any) => event.type === 'Approval' && event.owner.toLowerCase() === signerAddress.toLowerCase())
-        .map((event: any) => ({ spender: event.spender, amount: event.value })),
-      contractsCalled: simulation.calledAddresses,
-    }
-    
-    const comparison = checkIntentOutcome(intent, outcome)
-    if (!comparison.passed) throw new Error(`Intent/outcome check failed: ${comparison.reasons.join('; ')}`)
-    
-    return { ...simulation, comparison, amountIn: swap.amountIn.toString(), minAmountOut: swap.minAmountOut.toString() }
-  } finally {
-    await fork.destroy()
-  }
-}
-
-// ------------------ NEW P2 FUNCTIONS FOR GUARD PIPELINE ------------------
-
-export async function sendAuthorized(txRequests: TxRequest[], authorization: any, ctx: any) {
-  requireKillSwitchOff()
-  const { provider: rpc, wallet: signer } = getSigner(ctx)
-  
-  let lastTxHash = ''
-  let nonce = await nextNonce(rpc, signer)
-
-  for (const tx of txRequests) {
-    const response = await signer.sendTransaction({
-      to: tx.to, value: tx.value, data: tx.data, nonce: nonce,
-    })
-    const receipt = await response.wait()
-    if (!receipt || receipt.status !== 1) throw new Error(`Transaction failed: ${tx.description}`)
-    lastTxHash = receipt.hash
-    nonce++
-  }
-  return { txHash: lastTxHash, status: 'confirmed' }
-}
-
-export async function sendApproved(payload: { txRequests: TxRequest[], approval: any }, ctx: any) {
-  requireKillSwitchOff()
-  const { txRequests, approval } = payload
-  const { provider: rpc, wallet: signer } = getSigner(ctx)
-
-  if (!Number.isInteger(approval.chainId)) {
-    throw new Error('Approval is missing its authorized chain ID.')
-  }
-  if (Date.now() > approval.expiresAt) {
-    throw new Error('Security Alert: Approval has expired.')
-  }
-
-  const network = await rpc.getNetwork()
-  if (Number(network.chainId) !== approval.chainId) {
-    throw new Error(`Approval chain mismatch: expected ${approval.chainId}, connected to ${network.chainId}.`)
-  }
-
-  const currentDigest = computeApprovalDigest(txRequests, approval.expiresAt, approval.chainId)
-  if (currentDigest !== approval.digest) {
-    throw new Error('Security Alert: Transaction digest mismatch! Possible tampering.')
-  }
-
-  let lastTxHash = ''
-  let nonce = await nextNonce(rpc, signer)
-
-  for (const tx of txRequests) {
-    const response = await signer.sendTransaction({
-      to: tx.to, value: tx.value, data: tx.data, nonce: nonce,
-    })
-    const receipt = await response.wait()
-    if (!receipt || receipt.status !== 1) throw new Error(`Transaction failed: ${tx.description}`)
-    lastTxHash = receipt.hash
-    nonce++
-  }
-  return { txHash: lastTxHash, status: 'confirmed' }
+export {
+  assertNativeAutoExecutable,
+  assertSwapAutoExecutable,
+  getSigner,
+  getSignerAddress,
+  sendAuthorizedNativeTransfer,
+  sendAuthorizedSwap,
+  simulateAuthorizedSwap,
 }

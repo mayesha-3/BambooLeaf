@@ -44,7 +44,8 @@ test('replay refuses records whose case text changed, whose case is gone, or tha
 test('CLI: --mock records outputs, --replay re-scores them with no config, no keys and no model calls', () => {
   const dir = mkdtempSync(`${tmpdir()}/replay-`)
   const env = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' } // no PROVIDERS, no keys
-  const run = (...a: string[]) => spawnSync('npx', ['tsx', 'scripts/eval.ts', ...a, '--out-dir', dir], { cwd: root, env, encoding: 'utf8' })
+  const tsxCli = fileURLToPath(import.meta.resolve('tsx/cli'))
+  const run = (...a: string[]) => spawnSync(process.execPath, [tsxCli, 'scripts/eval.ts', ...a, '--out-dir', dir], { cwd: root, env, encoding: 'utf8' })
   const mock = run('--mock'); assert.equal(mock.status, 0, mock.stderr)
   const jsonl = readdirSync(dir).find((f) => f.startsWith('MOCK-') && f.endsWith('.jsonl'))!
   const lines = readFileSync(`${dir}/${jsonl}`, 'utf8').trim().split('\n').map((l) => JSON.parse(l))

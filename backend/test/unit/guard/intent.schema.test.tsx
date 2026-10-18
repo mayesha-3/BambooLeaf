@@ -28,6 +28,7 @@ test('intent schema rejects non-positive and malformed decimal amounts', () => {
 
 test('goal body is strict and bounded', () => {
   assert.equal(goalRequestSchema.safeParse({ goal: 'send funds' }).success, true)
+  assert.equal(goalRequestSchema.safeParse({ goal: 'send funds', untrusted: ['invoice 123'] }).success, true)
   assert.equal(goalRequestSchema.safeParse({ goal: ' ', ignored: true }).success, false)
   assert.equal(goalRequestSchema.safeParse({ goal: 'x'.repeat(2001) }).success, false)
 })

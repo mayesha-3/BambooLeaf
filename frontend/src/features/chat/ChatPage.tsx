@@ -10,6 +10,18 @@ type RichCard = BalanceCard | TransactionCard | PolicyCard | ApprovalCard | Swap
 type MessageRole = 'user' | 'agent' | 'system'
 interface ToolCall { name: string; status: 'running' | 'done' | 'failed'; detail?: string }
 interface Message { id: string; role: MessageRole; text?: string; untrusted?: string[]; cards?: RichCard[]; toolCalls?: ToolCall[]; ts: Date }
+interface GoalIntentSummary { action?: string; amount?: string | null; token?: string; recipient?: string | null }
+interface GoalApiResponse {
+  status?: string
+  txHash?: string
+  reason?: string
+  error?: string
+  code?: string
+  intent?: GoalIntentSummary
+  data?: { balanceEth?: string; balanceUsdc?: string }
+  approvalId?: string
+  approval?: { id?: string; digest?: string; expiresAt?: number }
+}
 
 function Icon({ d, size = 18, className = '' }: { d: ReactNode; size?: number; className?: string }) {
   return (
@@ -97,18 +109,30 @@ function PolicyCardView({ card }: { card: PolicyCard }) {
 }
 
 function ApprovalCardView({ card }: { card: ApprovalCard }) {
+  const hasSession = Boolean(window.sessionStorage.getItem('bambooleaf-device-session'))
   const [status, setStatus] = useState<'checking' | 'idle' | 'loading' | 'approved' | 'rejected' | 'closed' | 'error'>(
-    card.approvalId ? 'checking' : 'error',
+    card.approvalId && hasSession ? 'checking' : 'error',
   )
   const [errorMessage, setErrorMessage] = useState(
-    card.approvalId ? '' : 'Approval ID is missing. Submit the transaction again.',
+    !card.approvalId
+      ? 'Approval ID is missing. Submit the transaction again.'
+      : hasSession
+        ? ''
+        : 'Sign in with your wallet to check this approval.',
   )
   const [txHash, setTxHash] = useState<string | null>(null)
+  const approvalHeaders = () => {
+    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    if (!token) throw new Error('Sign in with your wallet before managing approvals.')
+    return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+  }
 
   useEffect(() => {
     let active = true
     if (!card.approvalId) return
-    fetch(`${apiBaseUrl}/approvals`)
+    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    if (!token) return
+    fetch(`${apiBaseUrl}/approvals`, { headers: { Authorization: `Bearer ${token}` } })
       .then(async (response) => {
         const data: { approvals?: Array<{ approvalId?: string }>; error?: string } = await response.json()
         if (!response.ok) throw new Error(data.error || 'Could not verify approval status.')
@@ -138,7 +162,7 @@ function ApprovalCardView({ card }: { card: ApprovalCard }) {
     try {
       const res = await fetch(`${apiBaseUrl}/approvals/${card.approvalId}/approve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: approvalHeaders(),
       })
       const data = await res.json()
       if (res.ok && data.status === 'confirmed') {
@@ -165,7 +189,7 @@ function ApprovalCardView({ card }: { card: ApprovalCard }) {
     try {
       const res = await fetch(`${apiBaseUrl}/approvals/${card.approvalId}/reject`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: approvalHeaders(),
       })
       const data = await res.json()
       if (!res.ok || data.status !== 'rejected') {
@@ -312,12 +336,12 @@ function TypingIndicator() {
 }
 
 function ContextPanel({ width, onResizeStart, userProfile }: { width: number; onResizeStart: (e: React.MouseEvent) => void; userProfile?: UserProfile }) {
-  const [walletData, setWalletData] = useState<any>(null)
+  const [walletData, setWalletData] = useState<{ balanceEth: string; balanceUsdc: string } | null>(null)
   const apiUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
 
   useEffect(() => {
     fetch(`${apiUrl}/wallet/balance`)
-      .then(res => res.json())
+      .then(res => res.json() as Promise<{ balanceEth: string; balanceUsdc: string }>)
       .then(data => setWalletData(data))
       .catch(console.error)
   }, [apiUrl])
@@ -407,10 +431,6 @@ function ContextPanel({ width, onResizeStart, userProfile }: { width: number; on
   )
 }
 
-const demoMessages: Message[] = [
-  { id: '0', role: 'system', text: 'BambooLeaf Agent connected · Sepolia testnet · Policy active', ts: new Date() },
-]
-
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
 
 async function getAgentResponse(userText: string, untrusted?: string[]): Promise<Message> {
@@ -427,16 +447,7 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
       signal: AbortSignal.timeout(15000),
     })
 
-    const data = await res.json().catch(() => null) as {
-      status?: string
-      txHash?: string
-      reason?: string
-      error?: string
-      code?: string
-      intent?: any
-      data?: any
-      approvalId?: string
-    } | null
+    const data = await res.json().catch(() => null) as GoalApiResponse | null
 
     if (data) {
       if (data.status === 'success' && data.data) {
@@ -450,6 +461,7 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
       }
 
       if (data.status === 'approval_required') {
+        const approvalId = data.approvalId || data.approval?.id
         return {
           id, role: 'agent',
           text: `This transaction requires your manual approval (T2).`,
@@ -459,7 +471,7 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
             description: `Transaction to ${data.intent?.recipient || 'recipient'}`, 
             amount: `${data.intent?.amount} ${data.intent?.token}`, 
             expires: 'in 5 min',
-            approvalId: data.approvalId
+            approvalId
           } as ApprovalCard],
           ts: new Date(),
         }
@@ -498,10 +510,10 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
         }
       }
     }
-  } catch (err) {
+  } catch (error) {
     return {
       id, role: 'agent',
-      text: `⚠ Backend unreachable or request timed out. Please check your server.`,
+      text: `⚠ ${error instanceof Error ? error.message : 'Backend unreachable or request timed out. Please check your server.'}`,
       toolCalls: [{ name: 'network.request()', status: 'failed' as const, detail: 'Connection failed' }],
       ts: new Date(),
     }
@@ -522,21 +534,19 @@ interface ChatPageProps {
 }
 
 export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {}) {
-  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
-    if (propProfile) return propProfile
+  const [storedUserProfile] = useState<UserProfile>(() => {
     try {
       const saved = localStorage.getItem('bambooleaf_user_profile')
       if (saved) return JSON.parse(saved)
-    } catch {}
+    } catch (error) {
+      console.warn('Unable to read saved user profile.', error)
+    }
     return {
       name: 'Mayes', handle: 'owner@bambooleaf.eth', email: 'mayes@bambooleaf.eth', walletAddress: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
       role: 'Primary Signer · Workspace Owner', avatarColor: 'from-[#65A30D] to-[#84CC16]', bio: '...', telegram: '@mayes_guard', cardName: 'MAYES · OWNER',
     }
   })
-
-  useEffect(() => {
-    if (propProfile) setUserProfile(propProfile)
-  }, [propProfile])
+  const userProfile = propProfile || storedUserProfile
 
   // UPDATED: Save chat to localStorage
   const [messages, setMessages] = useState<Message[]>(() => {

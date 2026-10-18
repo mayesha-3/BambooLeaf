@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { getAddress } from 'ethers'
 import { COLLECTIONS } from '../db/collections.tsx'
 import { getDatabase } from '../db/connection.tsx'
 
@@ -46,4 +47,32 @@ async function requireDeviceSession(request, response, next) {
   }
 }
 
-export { hashToken, requireDeviceSession }
+function requireAuditReadAccess(request, response, next) {
+  const walletAddress = request.deviceSession?.walletAddress
+  if (!walletAddress) {
+    response.status(401).json({ error: 'Sign in with an authorized wallet to access compliance records.' })
+    return
+  }
+
+  try {
+    const wallet = getAddress(walletAddress).toLowerCase()
+    const configuredOwner = process.env.OWNER_WALLET_ADDRESS?.trim()
+    const owner = configuredOwner ? getAddress(configuredOwner).toLowerCase() : ''
+    const auditors = (process.env.AUDITOR_WALLET_ADDRESSES || '')
+      .split(',')
+      .map((address) => address.trim())
+      .filter(Boolean)
+      .map((address) => getAddress(address).toLowerCase())
+    const role = wallet === owner ? 'owner' : auditors.includes(wallet) ? 'auditor' : null
+    if (!role) {
+      response.status(403).json({ error: 'This wallet is not authorized for compliance read access.' })
+      return
+    }
+    request.auditRole = role
+    next()
+  } catch {
+    response.status(503).json({ error: 'Owner or auditor wallet configuration is invalid.' })
+  }
+}
+
+export { hashToken, requireAuditReadAccess, requireDeviceSession }

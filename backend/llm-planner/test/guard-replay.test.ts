@@ -66,7 +66,8 @@ test('autonomy L1 holds a passing swap for approval (T2); the tier router is the
 test('CLI: replays a recorded MOCK file offline and says it is not the end-to-end red team; refuses files without outputs', () => {
   const dir = mkdtempSync(`${tmpdir()}/guard-`)
   const env = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' }
-  const sh = (...a: string[]) => spawnSync('npx', ['tsx', ...a, '--out-dir', dir], { cwd: root, env, encoding: 'utf8' })
+  const tsxCli = fileURLToPath(import.meta.resolve('tsx/cli'))
+  const sh = (...a: string[]) => spawnSync(process.execPath, [tsxCli, ...a, '--out-dir', dir], { cwd: root, env, encoding: 'utf8' })
   assert.equal(sh('scripts/eval.ts', '--mock').status, 0)
   const jsonl = `${dir}/${readdirSync(dir).find((f) => f.startsWith('MOCK-') && f.endsWith('.jsonl'))!}`
   const out = sh('scripts/guard-replay.ts', jsonl, '--autonomy', 'L1'); assert.equal(out.status, 0, out.stderr)

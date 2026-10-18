@@ -1,8 +1,10 @@
 export const COLLECTIONS = Object.freeze({
   audit: 'audit_events',
   auditHeads: 'audit_heads',
-  goals: 'goal_requests',
+  policyVersions: 'policy_versions',
+  autonomyState: 'autonomy_state',
   approvals: 'transaction_approvals',
+  goals: 'goal_requests',
   policyUsage: 'policy_usage',
   deviceAccounts: 'device_accounts',
   deviceChallenges: 'device_challenges',

@@ -63,10 +63,10 @@ export default function OverviewPage({
 }) {
   const displayCardName = userProfile?.cardName || (userProfile?.name ? `${userProfile.name.toUpperCase()} · OWNER` : 'MAYES · OWNER')
   const [walletState, setWalletState] = useState<WalletState>({ balance: null, loading: true, error: '' })
+  const [currentTime, setCurrentTime] = useState(0)
   const [chartPeriod, setChartPeriod] = useState<'7d' | '30d' | '90d'>('7d')
   const [chartType, setChartType] = useState<'bar' | 'line'>('bar')
   const [selectedDayIndex, setSelectedDayIndex] = useState<number>(6)
-  const [activeCardIndex, setActiveCardIndex] = useState<number>(0)
 
   // Fetch Live Wallet Balance
   useEffect(() => {
@@ -98,6 +98,11 @@ export default function OverviewPage({
     }
     void loadWalletBalance()
     return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setCurrentTime(Date.now()), 0)
+    return () => window.clearTimeout(timer)
   }, [])
 
   // Calculate Activity Chart Data
@@ -145,7 +150,7 @@ export default function OverviewPage({
   }))
   const linePath = linePoints.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x},${point.y}`).join(' ')
   const lineAreaPath = `${linePath} L 490,120 L 10,120 Z`
-  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+  const weekAgo = currentTime - 7 * 24 * 60 * 60 * 1000
   const recentAuditEntries = auditState.entries.filter((entry) => {
     const timestamp = new Date(entry.createdAt).getTime()
     return Number.isFinite(timestamp) && timestamp >= weekAgo

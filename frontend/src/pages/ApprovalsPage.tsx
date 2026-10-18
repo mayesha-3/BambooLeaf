@@ -1,123 +1,94 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Icon from '../components/ui/Icon'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import PageHeading from '../components/ui/PageHeading'
+import { apiBaseUrl } from '../config/api'
 
 interface ApprovalItem {
-  approvalId: string
   id: string
+  chainId: number
+  nonce: number
+  expiresAt: number
   action: string
   amount: string
   receive: string
   recipient: string
   risk: string
   reason: string
-  secondsLeft: number
   tone: 'green' | 'amber' | 'rose'
   digest: string
   tier: 'Tier 2 · Owner Approval Required' | 'Tier 3 · High Value Multi-sig'
-  calldata: string
-  chainId?: number
-}
-
-interface ApprovalRecord {
-  approvalId: string
-  digest: string
-  expiresAt: number
-  tier: string
-  reasons: string[]
-  intent: {
-    action: string
-    chainId?: number
-    from?: { token?: string; amount?: string }
-    to?: { token?: string }
-    recipient?: string
-  }
-  txRequests: Array<{ to: string; data: string; description: string }>
-}
-
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
-
-function toApprovalItem(approval: ApprovalRecord): ApprovalItem {
-  const { intent } = approval
-  const fromToken = intent.from?.token ?? 'Unknown token'
-  const amount = intent.from?.amount ?? 'Unknown amount'
-  const action = intent.action === 'swap'
-    ? `Swap ${fromToken} → ${intent.to?.token ?? 'unknown token'}`
-    : `${intent.action === 'transfer' ? 'Transfer' : intent.action} ${amount} ${fromToken}`
-  const destination = intent.recipient ?? approval.txRequests[0]?.to ?? 'Unknown recipient'
-
-  return {
-    approvalId: approval.approvalId,
-    id: approval.approvalId.slice(0, 8),
-    action,
-    amount: `${amount} ${fromToken}`,
-    receive: intent.to?.token ?? 'External Recipient',
-    recipient: destination,
-    risk: 'T2 Policy Check',
-    reason: approval.reasons.join(' '),
-    secondsLeft: Math.max(0, Math.ceil((approval.expiresAt - Date.now()) / 1000)),
-    tone: 'amber',
-    digest: approval.digest,
-    tier: 'Tier 2 · Owner Approval Required',
-    calldata: approval.txRequests.map((tx) => `${tx.description}: ${tx.data}`).join('\n'),
-    chainId: intent.chainId,
-  }
-}
-
-async function getPendingApprovals(): Promise<ApprovalItem[]> {
-  const response = await fetch(`${apiBaseUrl}/approvals`)
-  const data = await response.json()
-  if (!response.ok) throw new Error(data.error || 'Could not load pending approvals.')
-  return (data.approvals as ApprovalRecord[]).map(toApprovalItem)
 }
 
 export default function ApprovalsPage() {
   const [items, setItems] = useState<ApprovalItem[]>([])
+  const [now, setNow] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [pendingActionId, setPendingActionId] = useState<string | null>(null)
-  const [notice, setNotice] = useState<{ message: string; tone: 'green' | 'rose'; txHash?: string } | null>(null)
+  const [busyId, setBusyId] = useState('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState<{ message: string; tone: 'green' | 'rose' } | null>(null)
   const [inspectingItem, setInspectingItem] = useState<ApprovalItem | null>(null)
 
-  useEffect(() => {
-    let active = true
-    getPendingApprovals()
-      .then((approvals) => {
-        if (active) setItems(approvals)
+  const loadApprovals = useCallback(async () => {
+    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    if (!token) {
+      setError('Sign in with the owner wallet under Device Security to review approvals.')
+      setLoading(false)
+      return
+    }
+    try {
+      const response = await fetch(`${apiBaseUrl}/approvals`, {
+        headers: { Authorization: `Bearer ${token}` },
       })
-      .catch((error: unknown) => {
-        if (active) setLoadError(error instanceof Error ? error.message : 'Could not load pending approvals.')
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-    return () => {
-      active = false
+      const payload = await response.json() as {
+        approvals?: Array<{
+          approvalId: string
+          digest: string
+          chainId: number
+          nonce: number
+          expiresAt: number
+          intent: { action: string; from: { token: string; amount?: string }; recipient: string }
+          reasons: string[]
+        }>
+        error?: string
+      }
+      if (!response.ok) throw new Error(payload.error || `Approval request failed (${response.status})`)
+      setItems((payload.approvals || []).map((item) => ({
+        id: item.approvalId,
+        chainId: item.chainId,
+        nonce: item.nonce,
+        expiresAt: item.expiresAt,
+        action: 'Transfer ETH',
+        amount: `${item.intent.from.amount ?? '—'} ${item.intent.from.token}`,
+        receive: 'Native ETH transfer',
+        recipient: item.intent.recipient,
+        risk: 'Digest-bound approval',
+        reason: item.reasons.join('; '),
+        tone: 'amber',
+        digest: item.digest,
+        tier: 'Tier 2 · Owner Approval Required',
+      })))
+      setError('')
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load approval requests.')
+    } finally {
+      setLoading(false)
     }
   }, [])
 
-  function refreshApprovals() {
-    setLoading(true)
-    setLoadError(null)
-    getPendingApprovals()
-      .then(setItems)
-      .catch((error: unknown) => {
-        setLoadError(error instanceof Error ? error.message : 'Could not load pending approvals.')
-      })
-      .finally(() => setLoading(false))
-  }
-
   useEffect(() => {
+    const initialTime = window.setTimeout(() => setNow(Date.now()), 0)
     const timer = setInterval(() => {
-      setItems((current) => current.map((item) => ({
-        ...item,
-        secondsLeft: Math.max(0, item.secondsLeft - 1),
-      })))
+      setNow(Date.now())
     }, 1000)
-    return () => clearInterval(timer)
-  }, [])
+    const loadTimer = window.setTimeout(() => void loadApprovals(), 0)
+    return () => {
+      window.clearTimeout(initialTime)
+      window.clearTimeout(loadTimer)
+      clearInterval(timer)
+    }
+  }, [loadApprovals])
 
   function formatTime(secs: number) {
     const m = Math.floor(secs / 60)
@@ -126,36 +97,35 @@ export default function ApprovalsPage() {
   }
 
   async function decide(item: ApprovalItem, approved: boolean) {
-    setPendingActionId(item.approvalId)
-    setNotice(null)
+    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    if (!token) {
+      setError('Sign in with the owner wallet under Device Security before deciding.')
+      return
+    }
+    setBusyId(item.id)
+    setError('')
     try {
-      const response = await fetch(`${apiBaseUrl}/approvals/${item.approvalId}/${approved ? 'approve' : 'reject'}`, {
+      const response = await fetch(`${apiBaseUrl}/approvals/${item.id}/${approved ? 'approve' : 'reject'}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${token}` },
       })
-      const data = await response.json()
-      const expectedStatus = approved ? 'confirmed' : 'rejected'
-      if (!response.ok || data.status !== expectedStatus) {
-        throw new Error(data.error || `Approval request failed with status ${response.status}.`)
-      }
-      setItems((current) => current.filter((entry) => entry.approvalId !== item.approvalId))
+      const payload = await response.json() as { txHash?: string; error?: string }
+      if (!response.ok) throw new Error(payload.error || `Approval decision failed (${response.status})`)
       setNotice({
         message: approved
-          ? `Transaction confirmed for approval ${item.id}.`
+          ? `Approved exact digest ${item.digest.slice(0, 16)}…${payload.txHash ? ` · transaction ${payload.txHash}` : ''}`
           : `Approval ${item.id} was rejected.`,
         tone: approved ? 'green' : 'rose',
-        txHash: approved ? data.txHash : undefined,
       })
       setInspectingItem(null)
-    } catch (error) {
-      setNotice({
-        message: error instanceof Error ? error.message : 'Approval request failed.',
-        tone: 'rose',
-      })
+      await loadApprovals()
+    } catch (decisionError) {
+      setError(decisionError instanceof Error ? decisionError.message : 'Unable to submit approval decision.')
     } finally {
-      setPendingActionId(null)
+      setBusyId('')
     }
   }
+  const activeItems = items.filter((item) => item.expiresAt > now)
 
   return (
     <>
@@ -164,16 +134,17 @@ export default function ApprovalsPage() {
         title="Approval Queue"
         description="Review planned agent transactions before the autonomous signer executes them."
         action={
-          <Badge tone={items.length ? 'amber' : 'green'}>
-            <Icon name="clock" size={12} /> {items.length} pending
+          <Badge tone={error ? 'red' : activeItems.length ? 'amber' : 'green'}>
+            <Icon name="clock" size={12} /> {error ? 'unavailable' : `${activeItems.length} pending`}
           </Badge>
         }
       />
 
+      {error && <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{error}</div>}
       <div className="mb-6 flex items-start gap-3 rounded-2xl border border-blue-100 dark:border-blue-900/50 bg-blue-50/70 dark:bg-blue-950/40 p-4">
         <Icon name="eye" size={17} className="mt-0.5 shrink-0 text-blue-700 dark:text-blue-400" />
         <p className="text-xs leading-5 text-blue-900 dark:text-blue-200">
-          <span className="font-bold">Explain before sign.</span> Every approval request is cryptographically bound to an exact transaction digest and expires automatically if not authorized within the window.
+          <span className="font-bold">Explain before sign.</span> Only native ETH transfers can be approved here. Each digest expires after two minutes, and authorizing it immediately submits the exact reviewed transaction after the signer rechecks its chain, nonce, and policy.
         </p>
       </div>
 
@@ -187,27 +158,15 @@ export default function ApprovalsPage() {
           }`}
         >
           <span>{notice.message}</span>
-          {notice.txHash && (
-            <span className="ml-3 break-all font-mono text-[10px]">{notice.txHash}</span>
-          )}
           <button onClick={() => setNotice(null)} className="text-slate-400 hover:text-slate-600 font-bold ml-2">
             ✕
           </button>
         </div>
       )}
 
-      {loading ? (
-        <Card className="p-10 text-center text-sm text-slate-500">Loading pending approvals…</Card>
-      ) : loadError ? (
-        <Card className="p-10 text-center">
-          <p role="alert" className="text-sm text-rose-600 dark:text-rose-400">{loadError}</p>
-          <button onClick={refreshApprovals} className="mt-4 rounded-full border border-slate-200 dark:border-slate-700 px-4 py-2 text-xs font-bold">
-            Retry
-          </button>
-        </Card>
-      ) : items.length ? (
+      {activeItems.length ? (
         <div className="space-y-4">
-          {items.map((item) => (
+          {activeItems.map((item) => (
             <Card key={item.id} className="p-6 transition hover:border-slate-300 dark:hover:border-slate-700">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex items-start gap-3">
@@ -233,7 +192,7 @@ export default function ApprovalsPage() {
                     <p className="mt-1 text-xs text-slate-400">
                       Requested {item.id} ·{' '}
                       <span className="text-amber-700 dark:text-amber-400 font-semibold font-mono">
-                        Expires in {formatTime(item.secondsLeft)}
+                        Expires in {formatTime(Math.ceil((item.expiresAt - now) / 1000))}
                       </span>
                     </p>
                   </div>
@@ -274,20 +233,18 @@ export default function ApprovalsPage() {
 
                 <div className="flex gap-2">
                   <button
-                    type="button"
-                    disabled={pendingActionId !== null}
+                    disabled={busyId === item.id}
                     onClick={() => decide(item, false)}
-                    className="rounded-full border border-slate-200 dark:border-slate-700 px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition disabled:opacity-50"
+                    className="rounded-full border border-slate-200 dark:border-slate-700 px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
                   >
-                    {pendingActionId === item.approvalId ? 'Processing…' : 'Reject'}
+                    Reject
                   </button>
                   <button
-                    type="button"
-                    disabled={pendingActionId !== null}
+                    disabled={busyId === item.id}
                     onClick={() => decide(item, true)}
-                    className="rounded-full bg-slate-950 dark:bg-lime-400 dark:text-slate-950 dark:hover:bg-lime-300 px-5 py-2 text-xs font-bold text-white hover:bg-slate-800 shadow-sm transition disabled:opacity-50"
+                    className="rounded-full bg-slate-950 dark:bg-lime-400 dark:text-slate-950 dark:hover:bg-lime-300 px-5 py-2 text-xs font-bold text-white hover:bg-slate-800 shadow-sm transition"
                   >
-                    Authorize & Sign
+                    {busyId === item.id ? 'Submitting…' : 'Authorize & Sign'}
                   </button>
                 </div>
               </div>
@@ -296,17 +253,14 @@ export default function ApprovalsPage() {
               {inspectingItem?.id === item.id && (
                 <div className="mt-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-900 p-4 text-xs font-mono text-slate-100 space-y-2 animate-in fade-in duration-150">
                   <div className="flex justify-between items-center text-slate-400 text-[11px] pb-1 border-b border-slate-800">
-                    <span>EIP-712 Digest Authentication</span>
-                    <span>Chain ID: {item.chainId ?? 'unknown'}</span>
+                    <span>Keccak Transaction Digest</span>
+                    <span>Chain ID: {item.chainId} · Nonce: {item.nonce}</span>
                   </div>
                   <div>
                     <span className="text-slate-400">Digest Hash: </span>
                     <span className="text-lime-400 break-all">{item.digest}</span>
                   </div>
-                  <div>
-                    <span className="text-slate-400">Calldata: </span>
-                    <span className="text-slate-300 break-all">{item.calldata}</span>
-                  </div>
+                  <div><span className="text-slate-400">Expires at: </span><span>{new Date(item.expiresAt).toISOString()}</span></div>
                 </div>
               )}
             </Card>
@@ -317,13 +271,13 @@ export default function ApprovalsPage() {
           <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-lime-50 dark:bg-lime-950/50 text-[#65A30D] dark:text-lime-400">
             <Icon name="checkCircle" size={20} />
           </span>
-          <h2 className="mt-4 text-sm font-bold text-slate-900 dark:text-white">Queue is clear</h2>
-          <p className="mt-1 text-xs text-slate-400">There are no pending approvals requiring human review.</p>
+          <h2 className="mt-4 text-sm font-bold text-slate-900 dark:text-white">{loading ? 'Loading approvals…' : error ? 'Approvals unavailable' : 'Queue is clear'}</h2>
+          <p className="mt-1 text-xs text-slate-400">{loading ? 'Checking the owner-authenticated approval queue.' : error ? 'Sign in with the configured owner wallet and confirm the backend is reachable.' : 'There are no pending approvals requiring human review.'}</p>
           <button
-            onClick={refreshApprovals}
+            onClick={() => void loadApprovals()}
             className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:border-lime-500 transition"
           >
-            <Icon name="refresh" size={13} /> Refresh approvals
+            <Icon name="refresh" size={13} /> Refresh Approval Queue
           </button>
         </Card>
       )}
