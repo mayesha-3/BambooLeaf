@@ -165,16 +165,16 @@ async function processSwap(database, intent, summary, policy, requestId) {
   }
 }
 
-async function processGoal(database, goal, requestId) {
+async function processGoal(database, goal, requestId, options = {}) {
   await appendAuditEvent(database, {
     requestId,
     type: 'goal.received',
-    data: { goalSha256: goalHash(goal) },
+    data: { goalSha256: goalHash(goal), untrustedNotes: Array.isArray(options.untrusted) ? options.untrusted.length : 0 },
   })
 
   let intent
   try {
-    intent = await planGoal(goal, Number(process.env.CHAIN_ID || 31337))
+    intent = await planGoal(goal, Number(process.env.CHAIN_ID || 31337), { untrusted: options.untrusted })
   } catch (error) {
     await appendAuditEvent(database, {
       requestId,
@@ -300,7 +300,7 @@ async function processGoal(database, goal, requestId) {
   }
 }
 
-async function submitGoal(database, goal, idempotencyKey) {
+async function submitGoal(database, goal, idempotencyKey, options = {}) {
   const goals = database.collection(COLLECTIONS.goals)
   const requestId = randomUUID()
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
@@ -323,7 +323,7 @@ async function submitGoal(database, goal, idempotencyKey) {
   }
 
   try {
-    const result = await processGoal(database, goal, requestId)
+    const result = await processGoal(database, goal, requestId, options)
     await goals.updateOne(
       { idempotencyKey },
       { $set: { status: 'complete', statusCode: result.statusCode, body: result.body } },

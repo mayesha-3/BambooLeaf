@@ -32,8 +32,18 @@ const intentSchema = z.object({
   }
 })
 
+const untrustedTextSchema = z.string()
+  .trim()
+  .min(1)
+  .max(4000)
+  .refine((value) => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value), 'Untrusted text contains invalid control characters')
+
 const goalRequestSchema = z.object({
-  goal: z.string().trim().min(1).max(2000),
+  goal: z.string().trim().min(1).max(2000).refine(
+    (value) => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value),
+    'Goal contains invalid control characters',
+  ),
+  untrusted: z.array(untrustedTextSchema).max(5).optional(),
 }).strict()
 
 export { goalRequestSchema, intentSchema }

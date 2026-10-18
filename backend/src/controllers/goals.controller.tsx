@@ -17,7 +17,9 @@ async function createGoal(request, response, next) {
   }
 
   try {
-    const result = await submitGoal(getDatabase(), parsed.data.goal, idempotencyKey)
+    const result = await submitGoal(getDatabase(), parsed.data.goal, idempotencyKey, {
+      untrusted: parsed.data.untrusted,
+    })
     response.status(result.statusCode).json(result.body)
   } catch (error) {
     next(error)
