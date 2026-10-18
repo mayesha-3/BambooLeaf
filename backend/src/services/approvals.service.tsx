@@ -20,6 +20,7 @@ import { getSigner, sendAuthorizedNativeTransfer } from '../signer/signer-servic
 import { peekNextNonce } from '../signer/nonce-manager.tsx'
 import { transactionDigest, verifyTransactionDigest } from '../signer/approval-digest.tsx'
 import { issueGuardAuthorizationUntil } from '../guard/guard-auth.tsx'
+import { policyWithVerifiedSupplierRecipients } from '../db/repositories/suppliers.repository.tsx'
 
 const APPROVAL_TTL_MS = 2 * 60 * 1000
 
@@ -71,7 +72,7 @@ function tierForTransfer(intent, policy) {
   return { decision, tier }
 }
 
-async function createTransferApproval(database, intent, requestId) {
+async function createTransferApproval(database, intent, requestId, invoiceId) {
   if (isKillSwitchActive()) throw new ApprovalError(423, 'Kill switch is active; no approval request can be created.')
   if (!process.env.AGENT_KEY) throw new ApprovalError(503, 'Signer is not configured.')
   if (!process.env.OWNER_WALLET_ADDRESS) throw new ApprovalError(503, 'OWNER_WALLET_ADDRESS must be configured for human approvals.')
@@ -81,7 +82,7 @@ async function createTransferApproval(database, intent, requestId) {
   } catch {
     throw new ApprovalError(503, 'OWNER_WALLET_ADDRESS is invalid.')
   }
-  const policy = readPolicyConfig()
+  const policy = await policyWithVerifiedSupplierRecipients(database, readPolicyConfig())
   const { decision, tier } = tierForTransfer(intent, policy)
   if (tier.tier !== 'T2') throw new ApprovalError(409, 'Transfer no longer requires human approval.')
 
@@ -106,6 +107,7 @@ async function createTransferApproval(database, intent, requestId) {
     approvalId,
     requestId,
     ownerWallet,
+    invoiceId,
     intent,
     chainId: intent.chainId,
     reasons: tier.reasons,
@@ -140,6 +142,12 @@ async function rejectTransferApproval(database, approvalId, ownerWallet, request
     type: 'approval.rejected',
     data: { approvalId, walletAddress: ownerWallet },
   })
+  if (approval.invoiceId) {
+    await database.collection(COLLECTIONS.invoices).updateOne(
+      { invoiceId: approval.invoiceId, status: 'awaiting_approval' },
+      { $set: { status: 'rejected', reviewedBy: ownerWallet, updatedAt: new Date() } },
+    )
+  }
   return { approvalId, status: 'rejected' }
 }
 
@@ -160,7 +168,7 @@ async function approveTransfer(database, approvalId, ownerWallet, requestId) {
     throw new ApprovalError(409, 'Stored approval intent is invalid.')
   }
   const intent = parsed.data
-  const policy = readPolicyConfig()
+  const policy = await policyWithVerifiedSupplierRecipients(database, readPolicyConfig())
   let decision
   let tier
   try {
@@ -257,6 +265,12 @@ async function approveTransfer(database, approvalId, ownerWallet, requestId) {
       txHash: transaction.txHash,
       executedDigest: transaction.digest,
     })
+    if (approval.invoiceId) {
+      await database.collection(COLLECTIONS.invoices).updateOne(
+        { invoiceId: approval.invoiceId, status: 'awaiting_approval' },
+        { $set: { status: 'paid', txHash: transaction.txHash, updatedAt: new Date() } },
+      )
+    }
     await appendAuditEvent(database, {
       requestId,
       type: 'approval.executed',

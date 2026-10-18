@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import Icon from './ui/Icon'
 import { apiBaseUrl } from '../config/api'
+import { authenticatedFetch } from '../lib/device-session'
 import type { GoalResponse } from '../types'
 
 /** Human-readable messages for each planner failure code */
@@ -62,7 +63,7 @@ export default function GoalComposer({ onSubmitted }: { onSubmitted?: () => void
       if (showAttach && untrustedText.trim()) {
         body.untrusted = [untrustedText.trim()]
       }
-      const response = await fetch(`${apiBaseUrl}/goal`, {
+      const response = await authenticatedFetch(`${apiBaseUrl}/goal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify(body),

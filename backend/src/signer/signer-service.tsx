@@ -9,6 +9,8 @@ import { checkIntentOutcome } from '../guard/intent-outcome-checker.tsx'
 import { transactionDigest, verifyTransactionDigest } from './approval-digest.tsx'
 import { getLevel, requireKillSwitchOff } from '../guard/autonomy-manager.tsx'
 import { nextNonce, resetNonceCache } from './nonce-manager.tsx'
+import { getDatabase } from '../db/connection.tsx'
+import { policyWithVerifiedSupplierRecipients } from '../db/repositories/suppliers.repository.tsx'
 
 let provider
 let wallet
@@ -221,7 +223,7 @@ function sendAuthorizedNativeTransfer(intent, authorization) {
     if (chainId !== Number(process.env.CHAIN_ID || 31337) || chainId !== intent.chainId) {
       throw new Error('Connected chain ID does not match the configured policy chain')
     }
-    const policy = readPolicyConfig()
+    const policy = await policyWithVerifiedSupplierRecipients(getDatabase(), readPolicyConfig())
     const tier = assertNativeAutoExecutable(intent, policy, typeof authorization.approvedDigest === 'string')
 
     const nonce = await nextNonce(rpc, signer)
@@ -264,7 +266,7 @@ function sendAuthorizedNativeTransfer(intent, authorization) {
     }
     const finalTier = assertNativeAutoExecutable(
       intent,
-      readPolicyConfig(),
+      await policyWithVerifiedSupplierRecipients(getDatabase(), readPolicyConfig()),
       typeof authorization.approvedDigest === 'string',
     )
     if (finalTier.tier === 'T2' && !authorization.approvedDigest) {

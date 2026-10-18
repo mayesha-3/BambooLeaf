@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { authenticatedFetch } from '../../lib/device-session'
 
 type AuditEntry = {
   seq: number
@@ -31,8 +32,8 @@ function AuditPage({ apiBaseUrl, refreshKey }: Props) {
   const loadAudit = useCallback(async () => {
     try {
       const [entriesResponse, verifyResponse] = await Promise.all([
-        fetch(`${apiBaseUrl}/audit?limit=50`),
-        fetch(`${apiBaseUrl}/audit/verify`),
+        authenticatedFetch(`${apiBaseUrl}/audit?limit=50`),
+        authenticatedFetch(`${apiBaseUrl}/audit/verify`),
       ])
       const entriesPayload = await entriesResponse.json() as { entries?: AuditEntry[]; error?: string }
       const verifyPayload = await verifyResponse.json() as ChainStatus & { error?: string }
