@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { UserProfile } from '../../types'
+import { useApprovals } from '../../lib/hooks/useApprovals'
 
 interface BalanceCard { kind: 'balance'; eth: string; usdc: string; total: string; change: string }
 interface TransactionCard { kind: 'transaction'; status: 'confirmed' | 'pending' | 'blocked'; type: string; amount: string; to: string; hash?: string; reason?: string }
@@ -223,6 +224,7 @@ function TypingIndicator() {
 }
 
 function ContextPanel({ width, onResizeStart, userProfile }: { width: number; onResizeStart: (e: React.MouseEvent) => void; userProfile?: UserProfile }) {
+  const { count: approvalsCount } = useApprovals()
   return (
     <aside className="hidden xl:flex flex-col shrink-0 border-l border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0c1220] overflow-y-auto relative transition-colors" style={{ width }}>
       {/* Resize handle */}
@@ -287,15 +289,17 @@ function ContextPanel({ width, onResizeStart, userProfile }: { width: number; on
           </div>
         </div>
         <div>
-          <div className="flex items-center justify-between mb-2.5"><p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Pending approvals</p><span className="bg-amber-400 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-full">2</span></div>
-          <div className="space-y-2">
-            {[{ label: 'Swap 12 USDC → ETH', sub: 'T2 · expires in 4 min', urgent: true }, { label: 'Transfer 0.005 ETH', sub: 'T2 · Pending review', urgent: false }].map((item, i) => (
-              <div key={i} className={`rounded-xl p-3 border ${item.urgent ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-100 dark:border-amber-900/50' : 'bg-slate-50 dark:bg-slate-900 border-slate-100 dark:border-slate-800'}`}>
-                <p className={`text-[11px] font-bold ${item.urgent ? 'text-amber-900 dark:text-amber-300' : 'text-slate-800 dark:text-slate-200'}`}>{item.label}</p>
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{item.sub}</p>
-              </div>
-            ))}
+          <div className="flex items-center justify-between mb-2.5">
+            <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Pending approvals</p>
+            <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-full transition-all ${
+              approvalsCount > 0 ? 'bg-amber-400 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+            }`}>
+              {approvalsCount}
+            </span>
           </div>
+          <p className="text-[11px] text-slate-400">
+            {approvalsCount > 0 ? `${approvalsCount} approval${approvalsCount > 1 ? 's' : ''} awaiting signature` : 'No pending approvals'}
+          </p>
         </div>
         <div>
           <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2.5">Active guardrails</p>

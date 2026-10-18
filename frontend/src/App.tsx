@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { Page, AuditEntry, AuditState, UserProfile } from './types'
 import type { IconName } from './types'
 import { apiBaseUrl } from './config/api'
@@ -15,6 +15,7 @@ import SettingsPage from './pages/SettingsPage'
 import ChatPage from './features/chat/ChatPage'
 import ProfileDropdown from './components/ProfileDropdown'
 import LiveMarketTicker from './features/market/LiveMarketTicker'
+import { useApprovals } from './lib/hooks/useApprovals'
 
 const navGroups: { label: string; items: { id: Page; label: string; icon: IconName; count?: string; isChat?: boolean }[] }[] = [
   {
@@ -28,7 +29,7 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: IconNa
     items: [
       { id: 'overview', label: 'Overview', icon: 'grid' },
       { id: 'activity', label: 'Activity log', icon: 'activity' },
-      { id: 'approvals', label: 'Approvals', icon: 'check', count: '2' },
+      { id: 'approvals', label: 'Approvals', icon: 'check' },
     ],
   },
   {
@@ -46,6 +47,7 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: IconNa
 ]
 
 export function App() {
+  const { count: approvalsCount } = useApprovals()
   const [page, setPage] = useState<Page>('chat')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -58,6 +60,20 @@ export function App() {
   const sidebarResizing = useRef(false)
   const sidebarRef = useRef<HTMLElement>(null)
 
+  const currentNavGroups = useMemo(() => {
+    return navGroups.map((group) => ({
+      ...group,
+      items: group.items.map((item) => {
+        if (item.id === 'approvals') {
+          return {
+            ...item,
+            count: String(approvalsCount),
+          }
+        }
+        return item
+      }),
+    }))
+  }, [approvalsCount])
   // Dark mode theme state
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try {
@@ -267,7 +283,7 @@ export function App() {
 
         {/* Navigation Links: BambooLeaf sections styled in Shakuro's active/pill design */}
         <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-6">
-          {navGroups.map((group) => (
+          {currentNavGroups.map((group) => (
             <div key={group.label}>
               {!sidebarCollapsed && (
                 <p className="mb-2 px-3 text-[10px] font-bold tracking-widest uppercase text-slate-400 dark:text-slate-500 font-display">
@@ -344,8 +360,14 @@ export function App() {
                           </span>
                         )}
                       </div>
-                      {item.count && !sidebarCollapsed && (
-                        <span className="bg-black dark:bg-lime-400 dark:text-slate-950 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
+                      {item.count !== undefined && !sidebarCollapsed && (
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 transition-all duration-200 ${
+                            item.count === '0'
+                              ? 'bg-slate-200/70 dark:bg-slate-800/80 text-slate-400 dark:text-slate-500'
+                              : 'bg-black dark:bg-lime-400 dark:text-slate-950 text-white shadow-sm'
+                          }`}
+                        >
                           {item.count}
                         </span>
                       )}
