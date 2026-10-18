@@ -52,7 +52,7 @@ function buildSwapTransactions(intent: any, {
   if (!Number.isInteger(maxSlippageBps) || maxSlippageBps < 0 || maxSlippageBps > 500) {
     throw new Error('Slippage must be between 0 and 500 basis points')
   }
-  if (quotedAmountOut <= 0n || !Number.isSafeInteger(deadline) || deadline <= Math.floor(Date.now() / 1000)) {
+  if (quotedAmountOut < 0n || !Number.isSafeInteger(deadline) || deadline <= Math.floor(Date.now() / 1000)) {
     throw new Error('Swap quote or deadline is invalid')
   }
 
@@ -63,8 +63,8 @@ function buildSwapTransactions(intent: any, {
   }
   const amountIn = parseUnits(intent.from.amount, tokenIn.decimals)
   const minAmountOut = quotedAmountOut * BigInt(10_000 - maxSlippageBps) / 10_000n
-  if (amountIn <= 0n || minAmountOut <= 0n) {
-    throw new Error('Swap input and minimum output must be greater than zero')
+  if (amountIn <= 0n || minAmountOut < 0n) {
+    throw new Error('Swap input amount must be greater than zero')
   }
 
   const router = getAddress(routerAddress)

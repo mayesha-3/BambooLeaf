@@ -5,7 +5,7 @@ import { getToken } from '../chain/token-registry.tsx'
 import { readPolicyConfig } from '../guard/policy-engine.tsx'
 import { simulateShadowFork } from '../chain/simulator.tsx'
 import { checkIntentOutcome } from '../guard/intent-outcome-checker.tsx'
-import { transactionDigest } from './approval-digest.tsx'
+import { transactionDigest, verifyTransactionDigest } from './approval-digest.tsx'
 import { requireKillSwitchOff } from '../guard/autonomy-manager.tsx'
 import { nextNonce, resetNonceCache } from './nonce-manager.tsx'
 
@@ -107,7 +107,7 @@ async function getSwapApprovalTransactions(provider, signerAddress, swap) {
 
 async function simulateAuthorizedSwap(intent, authorization) {
   requireKillSwitchOff()
-  const forkUrl = process.env.SHADOW_FORK_RPC_URL
+  const forkUrl = process.env.SHADOW_RPC_URL
   if (!forkUrl) throw new Error('SHADOW_FORK_RPC_URL must point to a local Anvil fork before swaps can execute')
   const signerAddress = getSignerAddress()
   const config = readPolicyConfig()
@@ -181,7 +181,6 @@ function sendAuthorizedNativeTransfer(intent, authorization) {
       throw new Error('Connected chain ID does not match the configured policy chain')
     }
 
-    // Use Nonce Manager to avoid duplicate nonces
     const nonce = await nextNonce(rpc, signer)
     const expiresAt = authorization.expiresAt
     const digest = transactionDigest({
@@ -192,6 +191,18 @@ function sendAuthorizedNativeTransfer(intent, authorization) {
       nonce,
       expiresAt,
     })
+
+    // --- Digest Verify check ---
+    if (authorization.approvedDigest) {
+      const isValid = verifyTransactionDigest(authorization.approvedDigest, {
+        chainId, to: tx.to, value: tx.value, data: tx.data, nonce, expiresAt
+      })
+      if (!isValid) {
+        throw new Error('Security Alert: Transaction digest mismatch! Possible tampering detected.')
+      }
+    }
+    // ---------------------------------
+
     const balance = await rpc.getBalance(signer.address)
     const maxBalance = process.env.MAX_AGENT_BALANCE
     if (maxBalance && balance > parseEther(maxBalance)) {
@@ -211,7 +222,6 @@ function sendAuthorizedNativeTransfer(intent, authorization) {
     return { txHash: receipt.hash, status: 'confirmed', digest }
   })
 
-  // If the operation fails, reset the nonce cache
   operation.catch(() => {
     resetNonceCache()
   })
@@ -236,11 +246,22 @@ function sendAuthorizedSwap(intent, authorization) {
     )
     let allowance = BigInt(await allowanceContract.allowance(signer.address, router))
     const digests = []
+    
     const sendApproval = async ({ to, value, data }) => {
       const nonce = await nextNonce(rpc, signer)
       const digest = transactionDigest({
         chainId, to, value, data, nonce, expiresAt: authorization.expiresAt,
       })
+
+      // ---Digest Verify check(Approval) ---
+      if (authorization.approvedApprovalDigest) {
+         const isValid = verifyTransactionDigest(authorization.approvedApprovalDigest, {
+           chainId, to, value, data, nonce, expiresAt: authorization.expiresAt
+         })
+         if (!isValid) throw new Error('Security Alert: Approval digest mismatch!')
+      }
+      // -----------------------------------------
+
       const response = await signer.sendTransaction({
         to, value, data, chainId, nonce,
       })
@@ -248,6 +269,7 @@ function sendAuthorizedSwap(intent, authorization) {
       if (!receipt || receipt.status !== 1) throw new Error('ERC-20 approval was not confirmed')
       digests.push(digest)
     }
+    
     if (allowance < amountIn) {
       for (const approval of await getSwapApprovalTransactions(rpc, signer.address, swap)) {
         await sendApproval(approval)
@@ -265,6 +287,18 @@ function sendAuthorizedSwap(intent, authorization) {
       nonce,
       expiresAt: authorization.expiresAt,
     })
+
+    // --- Digest Verify check---
+    if (authorization.approvedDigest) {
+      const isValid = verifyTransactionDigest(authorization.approvedDigest, {
+        chainId, to: router, value: 0n, data: authorization.transactionData, nonce, expiresAt: authorization.expiresAt
+      })
+      if (!isValid) {
+        throw new Error('Security Alert: Swap digest mismatch! Possible tampering detected.')
+      }
+    }
+    // -----------------------------------------
+
     const response = await signer.sendTransaction({
       to: router,
       value: 0n,

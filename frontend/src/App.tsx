@@ -16,6 +16,7 @@ import ChatPage from './features/chat/ChatPage'
 import ProfileDropdown from './components/ProfileDropdown'
 import LiveMarketTicker from './features/market/LiveMarketTicker'
 
+
 const navGroups: { label: string; items: { id: Page; label: string; icon: IconName; count?: string; isChat?: boolean }[] }[] = [
   {
     label: 'AGENT',

@@ -11,5 +11,10 @@ function transactionDigest({ chainId, to, value, data = '0x', nonce, expiresAt }
   })
   return keccak256(toUtf8Bytes(canonical))
 }
+// digest verify
+function verifyTransactionDigest(expectedDigest: string, currentParams: any): boolean {
+  const actualDigest = transactionDigest(currentParams)
+  return actualDigest === expectedDigest
+}
 
-export { transactionDigest }
+export { transactionDigest, verifyTransactionDigest }
