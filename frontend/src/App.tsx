@@ -16,7 +16,6 @@ import ChatPage from './features/chat/ChatPage'
 import ProfileDropdown from './components/ProfileDropdown'
 import LiveMarketTicker from './features/market/LiveMarketTicker'
 
-
 const navGroups: { label: string; items: { id: Page; label: string; icon: IconName; count?: string; isChat?: boolean }[] }[] = [
   {
     label: 'AGENT',
@@ -46,8 +45,16 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: IconNa
   },
 ]
 
+// Helper to get the page from the URL hash
+function getInitialPage(): Page {
+  const hash = window.location.hash.replace('#/', '')
+  const validPages: Page[] = ['overview', 'chat', 'activity', 'approvals', 'policy', 'autonomy', 'wallet', 'arena', 'settings']
+  return (validPages.includes(hash as Page) ? hash : 'chat') as Page
+}
+
 export function App() {
-  const [page, setPage] = useState<Page>('chat')
+  // Initialize state from URL
+  const [page, setPage] = useState<Page>(getInitialPage)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showGoalModal, setShowGoalModal] = useState(false)
@@ -58,6 +65,15 @@ export function App() {
   const [isResizingSidebar, setIsResizingSidebar] = useState(false)
   const sidebarResizing = useRef(false)
   const sidebarRef = useRef<HTMLElement>(null)
+
+  // Listen to browser back/forward buttons
+  useEffect(() => {
+    const handleHashChange = () => {
+      setPage(getInitialPage())
+    }
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
 
   // Dark mode theme state
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -152,6 +168,7 @@ export function App() {
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
   }, [sidebarCollapsed, sidebarWidth])
+
   const [auditState, setAuditState] = useState<AuditState>({
     entries: [],
     valid: null,
@@ -208,8 +225,10 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
+  // UPDATED: Navigate function that updates both state and URL
   const navigate = (nextPage: Page) => {
     setPage(nextPage)
+    window.location.hash = `/${nextPage}` // This saves the page in URL
     setMobileNavOpen(false)
   }
 
@@ -225,7 +244,7 @@ export function App() {
         />
       )}
 
-      {/* ================= LEFT SIDEBAR (BambooLeaf with Shakuro Styling) ================= */}
+      {/* ================= LEFT SIDEBAR ================= */}
       <aside
         ref={sidebarRef}
         className={`fixed inset-y-0 left-0 z-50 lg:static flex flex-col h-full bg-[#FBFBFC] dark:bg-[#0d1424] border-r border-slate-100 dark:border-slate-800/80 shrink-0 ${
@@ -239,13 +258,11 @@ export function App() {
             onClick={() => navigate('overview')}
             className="flex items-center gap-2.5 group text-left min-w-0"
           >
-            {/* Logo icon — always visible */}
             <span className="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#65A30D] via-[#84CC16] to-[#A3E635] flex items-center justify-center shrink-0 shadow-[0_2px_10px_rgba(132,204,22,0.35)] ring-1 ring-white/20">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2L12 3Z" />
               </svg>
             </span>
-            {/* Name & Version — hidden when collapsed */}
             {!sidebarCollapsed && (
               <div className="flex items-center gap-2 min-w-0 overflow-hidden">
                 <span className="text-lg font-black tracking-tight text-slate-950 dark:text-white group-hover:opacity-85 transition font-display whitespace-nowrap">
@@ -266,7 +283,7 @@ export function App() {
           </button>
         </div>
 
-        {/* Navigation Links: BambooLeaf sections styled in Shakuro's active/pill design */}
+        {/* Navigation Links */}
         <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-6">
           {navGroups.map((group) => (
             <div key={group.label}>
@@ -278,7 +295,6 @@ export function App() {
               <div className="space-y-1">
                 {group.items.map((item) => {
                   const isActive = page === item.id
-                  // Special rendering for Agent Chat
                   if (item.isChat) {
                     return (
                       <button
@@ -327,7 +343,6 @@ export function App() {
                           : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100/60 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100'
                       }`}
                     >
-                      {/* Left Dark / Lime Bar Indicator */}
                       {isActive && (
                         <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-[#84CC16] rounded-r-full shadow-[0_0_8px_rgba(132,204,22,0.6)]" />
                       )}
@@ -357,29 +372,6 @@ export function App() {
             </div>
           ))}
         </div>
-
-        {/* Bottom Card: Guarded Agent Status (Shakuro Pro Card style) */}
-        {!sidebarCollapsed && (
-          <div className="p-3.5 border-t border-slate-100/80 dark:border-slate-800/60">
-            {/* <div className="rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100/80 dark:from-slate-800/60 dark:to-slate-900/80 p-3.5 text-center border border-slate-200/70 dark:border-slate-700/60 shadow-sm backdrop-blur-sm space-y-2.5">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-slate-900 to-slate-700 dark:from-lime-400 dark:to-lime-500 text-white dark:text-slate-950 flex items-center justify-center mx-auto shadow-sm">
-                <Icon name="bolt" size={15} />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-slate-900 dark:text-white font-display">Guarded Agent Active</h4>
-                <p className="text-[11px] text-slate-400 dark:text-slate-400 mt-0.5 leading-relaxed">
-                  Deterministic policy firewall on Sepolia testnet.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowGoalModal(true)}
-                className="w-full bg-slate-950 hover:bg-black dark:bg-lime-400 dark:hover:bg-lime-300 dark:text-slate-950 text-white rounded-xl py-2 text-xs font-bold transition shadow-sm font-display tracking-tight"
-              >
-                + Plan agent goal
-              </button>
-            </div> */}
-          </div>
-        )}
 
         {/* Collapse sidebar button */}
         <div className="px-3.5 pb-3.5 pt-1">
@@ -413,10 +405,9 @@ export function App() {
       {/* ================= MAIN CONTENT AREA ================= */}
       <div className="flex-1 flex flex-col h-full min-w-0 bg-[#FBFBFC] dark:bg-[#090e1a] overflow-hidden transition-colors duration-200">
 
-        {/* Top Header Bar (Shakuro design style) */}
+        {/* Top Header Bar */}
         <header className="h-20 px-6 sm:px-8 border-b border-slate-100/80 dark:border-slate-800/80 flex items-center justify-between gap-4 shrink-0 bg-[#FBFBFC] dark:bg-[#090e1a] transition-colors duration-200">
 
-          {/* Quick Search Pill Input */}
           <div className="flex items-center gap-3 flex-1 max-w-md">
             <button
               onClick={() => setMobileNavOpen(true)}
@@ -438,15 +429,12 @@ export function App() {
             </div>
           </div>
 
-          {/* Right: Actions, Notifications, Profile, Network */}
           <div className="flex items-center gap-2 sm:gap-3">
-
             <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-lime-200 dark:border-lime-900/60 bg-lime-50 dark:bg-lime-950/40 px-3 py-1 text-[11px] font-bold text-[#65A30D] dark:text-lime-400">
               <span className="w-1.5 h-1.5 rounded-full bg-[#84CC16]" />
               Sepolia testnet
             </div>
 
-            {/* Notification Bell with Red Badge Dot */}
             <div className="relative">
               <button
                 onClick={() => setShowNotifications((prev) => !prev)}
@@ -477,7 +465,6 @@ export function App() {
               )}
             </div>
 
-            {/* Dark / Light Theme Toggle */}
             <button
               onClick={() => setDarkMode((prev) => !prev)}
               className="w-10 h-10 rounded-full border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 transition shadow-sm"
@@ -487,7 +474,6 @@ export function App() {
               <Icon name={darkMode ? 'sun' : 'moon'} size={17} className={darkMode ? 'text-amber-400' : 'text-slate-600 dark:text-slate-300'} />
             </button>
 
-            {/* Settings Gear Button */}
             <button
               onClick={() => navigate('settings')}
               className="w-10 h-10 rounded-full border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 transition shadow-sm"
@@ -496,7 +482,6 @@ export function App() {
               <Icon name="settings" size={17} />
             </button>
 
-            {/* User Profile Chip + Dropdown (Mayes / Owner Workspace) */}
             <div className="relative">
               <button
                 onClick={() => setShowProfileMenu((prev) => !prev)}
@@ -525,7 +510,6 @@ export function App() {
               />
             </div>
 
-            {/* + Plan goal Button */}
             <button
               onClick={() => setShowGoalModal(true)}
               className="inline-flex items-center gap-1.5 border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-bold px-4 py-2 rounded-full transition shadow-sm"
@@ -538,10 +522,8 @@ export function App() {
 
         </header>
 
-        {/* Global Real-Time Market Ticker Bar */}
         <LiveMarketTicker />
 
-        {/* Main Content Body with smooth page transitions */}
         <div key={page} className="flex-1 flex flex-col h-full overflow-hidden animate-page-fade">
           {page === 'chat' ? (
             <div className="flex-1 overflow-hidden">
@@ -577,7 +559,6 @@ export function App() {
 
       {/* ================= GLOBAL MODALS ================= */}
 
-      {/* 1. Ask BambooLeaf Agent Goal Modal */}
       {showGoalModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full border border-slate-100 dark:border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
@@ -597,7 +578,6 @@ export function App() {
         </div>
       )}
 
-      {/* 2. Global Quick Search Modal (⌘ K) */}
       {showSearchModal && (
         <div
           className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-start justify-center pt-20 p-4"
@@ -648,22 +628,6 @@ export function App() {
                   <span className="text-[10px] text-slate-400 dark:text-slate-500">Jump →</span>
                 </button>
               ))}
-              {searchQuery.trim() && [
-                { name: '⚡ Agent Chat — Talk to BambooLeaf', p: 'chat' as Page, keywords: 'chat agent talk bamboo' },
-                { name: 'Overview & Guarded Balance', p: 'overview' as Page, keywords: 'overview dashboard balance home' },
-                { name: 'Activity Log & Chain Hashes', p: 'activity' as Page, keywords: 'activity log audit chain hash history' },
-                { name: 'Pending Approvals Queue', p: 'approvals' as Page, keywords: 'approvals pending review queue' },
-                { name: 'Policy & Enforced Limits', p: 'policy' as Page, keywords: 'policy limits cap rules spending' },
-                { name: 'Autonomy & Permission Levels', p: 'autonomy' as Page, keywords: 'autonomy level permission trust' },
-                { name: 'Sepolia Testnet Wallet', p: 'wallet' as Page, keywords: 'wallet eth usdc sepolia testnet crypto' },
-                { name: 'Attack Arena Sandbox', p: 'arena' as Page, keywords: 'attack arena sandbox test security' },
-                { name: 'Settings & Security Defaults', p: 'settings' as Page, keywords: 'settings config security preferences' },
-              ].filter((item) => {
-                const q = searchQuery.toLowerCase()
-                return item.name.toLowerCase().includes(q) || item.keywords.includes(q)
-              }).length === 0 && (
-                <p className="text-center text-slate-400 py-4 text-xs">No results for "{searchQuery}"</p>
-              )}
             </div>
           </div>
         </div>
