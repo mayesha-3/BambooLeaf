@@ -5,7 +5,7 @@ import { authenticatedFetch } from '../../lib/device-session'
 interface BalanceCard { kind: 'balance'; eth: string; usdc: string; total: string; change: string; chainId?: number }
 interface TransactionCard { kind: 'transaction'; status: 'confirmed' | 'pending' | 'blocked'; type: string; amount: string; to: string; hash?: string; reason?: string }
 interface PolicyCard { kind: 'policy'; perTxCap: string; dailyCap: string; usedToday: string; autonomyLevel: string }
-interface ApprovalCard { kind: 'approval'; description: string; amount: string; expires: string; approvalId?: string; onApprove?: () => void; onReject?: () => void }
+interface ApprovalCard { kind: 'approval'; description: string; amount: string; expires: string; approvalId?: string }
 interface SwapCard { kind: 'swap'; from: string; to: string; amount: string; rate: string; status: 'proposed' | 'approved' | 'blocked' }
 type RichCard = BalanceCard | TransactionCard | PolicyCard | ApprovalCard | SwapCard
 type MessageRole = 'user' | 'agent' | 'system'
@@ -111,7 +111,7 @@ function PolicyCardView({ card }: { card: PolicyCard }) {
 
 function ApprovalCardView({ card }: { card: ApprovalCard }) {
   const hasSession = Boolean(window.sessionStorage.getItem('bambooleaf-device-session'))
-  const [status, setStatus] = useState<'checking' | 'idle' | 'loading' | 'executing' | 'approved' | 'rejected' | 'failed' | 'expired' | 'closed' | 'error'>(
+  const [status, setStatus] = useState<'checking' | 'pending' | 'executing' | 'approved' | 'rejected' | 'failed' | 'expired' | 'closed' | 'error'>(
     card.approvalId && hasSession ? 'checking' : 'error',
   )
   const [errorMessage, setErrorMessage] = useState(
@@ -123,137 +123,43 @@ function ApprovalCardView({ card }: { card: ApprovalCard }) {
   )
   const [txHash, setTxHash] = useState<string | null>(null)
   const [failureReason, setFailureReason] = useState('')
-  const approvalHeaders = () => {
-    const token = window.sessionStorage.getItem('bambooleaf-device-session')
-    if (!token) throw new Error('Sign in with your wallet before managing approvals.')
-    return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-  }
 
   useEffect(() => {
     let active = true
     if (!card.approvalId) return
     const token = window.sessionStorage.getItem('bambooleaf-device-session')
     if (!token) return
-    fetch(`${apiBaseUrl}/approvals`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(async (response) => {
-        const data: { approvals?: Array<{ approvalId?: string }>; error?: string } = await response.json()
-        if (!response.ok) throw new Error(data.error || 'Could not verify approval status.')
-        if (!Array.isArray(data.approvals)) throw new Error('Approval status response was invalid.')
-        return data.approvals.some((approval) => approval.approvalId === card.approvalId)
-      })
-      .then(async (isPending) => {
-        if (!active) return
-        if (isPending) {
-          setStatus('idle')
-          return
-        }
-        const response = await fetch(`${apiBaseUrl}/approvals/${card.approvalId}`, { headers: approvalHeaders() })
+    let timer: number | undefined
+    const poll = async () => {
+      try {
+        const response = await authenticatedFetch(`${apiBaseUrl}/approvals/${card.approvalId}`)
         const result = await response.json() as { status?: string; txHash?: string | null; failureReason?: string | null; error?: string }
         if (!response.ok) throw new Error(result.error || 'Could not verify approval status.')
+        if (!active) return
         if (result.txHash) setTxHash(result.txHash)
         if (result.failureReason) setFailureReason(result.failureReason)
         if (result.status === 'approved') setStatus('approved')
         else if (result.status === 'rejected') setStatus('rejected')
         else if (result.status === 'executing') setStatus('executing')
+        else if (result.status === 'pending') setStatus('pending')
         else if (result.status === 'expired') setStatus('expired')
         else if (['failed', 'stale', 'denied'].includes(result.status || '')) setStatus('failed')
         else setStatus('closed')
-      })
-      .catch((error: unknown) => {
+        if (result.status === 'pending' || result.status === 'executing') {
+          timer = window.setTimeout(() => void poll(), 2000)
+        }
+      } catch (error) {
         if (!active) return
         setErrorMessage(error instanceof Error ? error.message : 'Could not verify approval status.')
         setStatus('error')
-      })
+      }
+    }
+    void poll()
     return () => {
       active = false
+      if (timer !== undefined) window.clearTimeout(timer)
     }
   }, [card.approvalId])
-
-  useEffect(() => {
-    if (status !== 'executing' || !card.approvalId) return
-    let active = true
-    let timer: number
-    const poll = async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/approvals/${card.approvalId}`, {
-          headers: {
-            Authorization: `Bearer ${window.sessionStorage.getItem('bambooleaf-device-session') || ''}`,
-          },
-        })
-        const result = await response.json() as { status?: string; txHash?: string | null; failureReason?: string | null; error?: string }
-        if (!response.ok) throw new Error(result.error || 'Could not refresh transaction status.')
-        if (!active) return
-        if (result.txHash) setTxHash(result.txHash)
-        if (result.failureReason) setFailureReason(result.failureReason)
-        if (result.status === 'approved') setStatus('approved')
-        else if (result.status === 'rejected') setStatus('rejected')
-        else if (result.status === 'expired') setStatus('expired')
-        else if (['failed', 'stale', 'denied'].includes(result.status || '')) setStatus('failed')
-        else if (result.status !== 'executing') setStatus('closed')
-        else timer = window.setTimeout(() => void poll(), 2000)
-      } catch (error) {
-        if (!active) return
-        setErrorMessage(error instanceof Error ? error.message : 'Could not refresh transaction status.')
-        setStatus('error')
-      }
-    }
-    timer = window.setTimeout(() => void poll(), 2000)
-    return () => {
-      active = false
-      window.clearTimeout(timer)
-    }
-  }, [card.approvalId, status])
-
-  const handleApprove = async () => {
-    if (!card.approvalId) {
-      setErrorMessage('Approval ID is missing. Submit the transaction again.')
-      setStatus('error')
-      return
-    }
-    setStatus('loading')
-    try {
-      const res = await fetch(`${apiBaseUrl}/approvals/${card.approvalId}/approve`, {
-        method: 'POST',
-        headers: approvalHeaders(),
-      })
-      const data = await res.json()
-      if (res.ok && data.status === 'confirmed') {
-        setTxHash(typeof data.txHash === 'string' ? data.txHash : null)
-        setStatus('approved')
-        card.onApprove?.()
-      } else {
-        setErrorMessage(data.error || `Approval failed with status ${res.status}.`)
-        setStatus('error')
-      }
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Could not reach the approval service.')
-      setStatus('error')
-    }
-  }
-
-  const handleReject = async () => {
-    if (!card.approvalId) {
-      setErrorMessage('Approval ID is missing. Submit the transaction again.')
-      setStatus('error')
-      return
-    }
-    setStatus('loading')
-    try {
-      const res = await fetch(`${apiBaseUrl}/approvals/${card.approvalId}/reject`, {
-        method: 'POST',
-        headers: approvalHeaders(),
-      })
-      const data = await res.json()
-      if (!res.ok || data.status !== 'rejected') {
-        throw new Error(data.error || 'Backend did not reject the approval.')
-      }
-      setStatus('rejected')
-      card.onReject?.()
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Could not reject the approval.')
-      setStatus('error')
-    }
-  }
 
   return (
     <div className="mt-2 rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 p-4 max-w-[340px]">
@@ -265,24 +171,19 @@ function ApprovalCardView({ card }: { card: ApprovalCard }) {
           <div className="flex gap-2 text-[11px] font-bold mt-1"><span className="text-amber-700 dark:text-amber-400">{card.amount}</span><span className="text-slate-400">·</span><span className="text-slate-500 dark:text-slate-400">Expires {card.expires}</span></div>
         </div>
       </div>
-      {status === 'idle' && (
-        <div className="flex gap-2 mt-3">
-          <button onClick={handleApprove} className="flex-1 bg-slate-900 hover:bg-black dark:bg-lime-400 dark:hover:bg-lime-300 text-white dark:text-slate-950 rounded-xl py-2 text-[11px] font-bold transition flex items-center justify-center gap-1.5 font-display"><Icon d={Icons.check} size={12} /> Approve</button>
-          <button onClick={handleReject} className="flex-1 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 rounded-xl py-2 text-[11px] font-bold border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition flex items-center justify-center gap-1.5 font-display"><Icon d={Icons.x} size={12} /> Reject</button>
-        </div>
-      )}
-      {(status === 'checking' || status === 'loading') && (
+      {status === 'checking' && (
         <div className="mt-3 rounded-xl py-2 flex justify-center items-center text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500">
           <span className="w-3 h-3 rounded-full border-2 border-slate-400 border-t-transparent animate-spin mr-2" />
-          {status === 'checking' ? 'Checking approval status...' : 'Processing...'}
+          Checking approval status...
         </div>
       )}
+      {status === 'pending' && <div className="mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">Waiting for an admin to review this request in the Approval Queue.</div>}
       {status === 'approved' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-lime-50 dark:bg-lime-950/60 text-[#65A30D] dark:text-lime-400">✓ Transaction confirmed{txHash ? <span className="mt-1 block break-all font-mono text-[10px]">{txHash}</span> : null}</div>}
       {status === 'rejected' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">✗ Transaction rejected</div>}
       {status === 'executing' && <div className="mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">Transaction broadcast; waiting for chain confirmation.{txHash ? <span className="mt-1 block break-all font-mono text-[10px]">{txHash}</span> : null}</div>}
       {status === 'expired' && <div className="mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">Approval expired. Submit the transaction again to request a fresh approval.</div>}
       {status === 'failed' && <div role="alert" className="mt-3 rounded-xl px-3 py-2 text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300">Transaction was not confirmed: {failureReason || 'Check Activity Log for the execution result.'}{txHash ? <span className="mt-1 block break-all font-mono text-[10px]">Broadcast transaction: {txHash}</span> : null}</div>}
-      {status === 'closed' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">This approval is no longer pending. Check the Approval Queue for its latest status.</div>}
+      {status === 'closed' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">This approval is closed. Check the Approval Queue for its latest status.</div>}
       {status === 'error' && <div role="alert" className="mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">⚠ {errorMessage}</div>}
     </div>
   )

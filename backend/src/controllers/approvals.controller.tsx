@@ -40,7 +40,7 @@ async function list(request, response, next) {
 }
 
 async function status(request, response, next) {
-  const owner = authenticatedOwner(request, response)
+  const owner = approvalOwner(request, response)
   if (!owner) return
   const approvalId = request.params.approvalId
   if (!approvalIdPattern.test(approvalId)) {

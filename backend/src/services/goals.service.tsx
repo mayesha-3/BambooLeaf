@@ -22,6 +22,29 @@ import { policyWithVerifiedSupplierRecipients } from '../db/repositories/supplie
 import { getAddress } from 'ethers'
 import { intentSchema } from '../guard/intent.schema.tsx'
 
+const blockedCodes = new Set([
+  'UNTRUSTED_CONTENT_FLAGGED',
+  'QUARANTINE_FAILED',
+  'INPUT_INVALID',
+  'MODEL_REFUSED',
+  'INVALID_OUTPUT',
+  'UNGROUNDED_RECIPIENT',
+  'UNKNOWN_CONTACT',
+  'PROVIDERS_UNAVAILABLE',
+  'BUDGET_EXCEEDED',
+  'APPROVAL_EXPIRED',
+  'DIGEST_MISMATCH',
+  'SIMULATION_FAILED',
+  'TIER_3_FORBIDDEN',
+])
+
+const autonomyFreezeCodes = new Set([
+  'UNTRUSTED_CONTENT_FLAGGED',
+  'UNGROUNDED_RECIPIENT',
+  'DIGEST_MISMATCH',
+  'TIER_3_FORBIDDEN',
+])
+
 async function recordBlocked(database, requestId, reason, critical = false) {
   const previous = getState()
   recordBlockedAttempt(reason, critical)
@@ -111,7 +134,6 @@ async function processSwap(database, intent, summary, policy, requestId) {
     decision = { allowed: false, reason: error instanceof Error ? error.message : 'Swap policy evaluation failed.' }
   }
   if (!decision.allowed) {
-    await recordBlocked(database, requestId, decision.reason)
     await appendAuditEvent(database, {
       requestId, type: 'policy.denied', data: { ...summary, reason: decision.reason },
     })
@@ -178,7 +200,6 @@ async function processSwap(database, intent, summary, policy, requestId) {
       scope: `swap:${token.symbol}`,
     })
     if (!reservation.allowed) {
-      await recordBlocked(database, requestId, reservation.reason)
       await appendAuditEvent(database, {
         requestId, type: 'policy.denied', data: { ...summary, reason: reservation.reason },
       })
@@ -208,7 +229,6 @@ async function processSwap(database, intent, summary, policy, requestId) {
     })
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'Shadow simulation failed'
-    await recordBlocked(database, requestId, reason, true)
     await appendAuditEvent(database, {
       requestId, type: 'swap.shadow_simulation_failed', data: { ...summary, reason },
     })
@@ -269,28 +289,15 @@ async function processGoal(
     if (!intent) intent = await planner(goal, Number(process.env.CHAIN_ID || 31337), untrusted)
   } catch (error) {
     const code = error.code || undefined
-    const blockedCodes = [
-      'UNTRUSTED_CONTENT_FLAGGED',
-      'QUARANTINE_FAILED',
-      'INPUT_INVALID',
-      'MODEL_REFUSED',
-      'INVALID_OUTPUT',
-      'UNGROUNDED_RECIPIENT',
-      'UNKNOWN_CONTACT',
-      'PROVIDERS_UNAVAILABLE',
-      'BUDGET_EXCEEDED',
-       'APPROVAL_EXPIRED',
-  'DIGEST_MISMATCH',
-  'SIMULATION_FAILED',
-  'TIER_3_FORBIDDEN'
-    ]
-    if (code && blockedCodes.includes(code)) {
-      await recordBlocked(
-        database,
-        requestId,
-        `${code}: ${error.message}`,
-        code === 'UNTRUSTED_CONTENT_FLAGGED',
-      )
+    if (code && blockedCodes.has(code)) {
+      if (autonomyFreezeCodes.has(code)) {
+        await recordBlocked(
+          database,
+          requestId,
+          `${code}: ${error.message}`,
+          code === 'UNTRUSTED_CONTENT_FLAGGED',
+        )
+      }
       await appendAuditEvent(database, {
         requestId,
         type: 'planner.blocked',
@@ -403,7 +410,6 @@ async function processGoal(
 
   const decision = evaluateNativeTransfer(intent, policy)
   if (!decision.allowed) {
-    await recordBlocked(database, requestId, decision.reason)
     await appendAuditEvent(database, {
       requestId,
       type: 'policy.denied',

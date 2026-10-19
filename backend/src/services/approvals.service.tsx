@@ -194,7 +194,6 @@ async function approveTransfer(database, approvalId, ownerWallet, requestId) {
   } catch (error) {
     if (error instanceof ApprovalError) {
       await updateApproval(database, approvalId, 'denied', { failureReason: error.message })
-      await recordBlocked(database, requestId, error.message)
     }
     throw error
   }
@@ -209,7 +208,6 @@ async function approveTransfer(database, approvalId, ownerWallet, requestId) {
   const network = await provider.getNetwork()
   if (Number(network.chainId) !== policy.chainId || Number(network.chainId) !== intent.chainId) {
     await updateApproval(database, approvalId, 'stale', { failureReason: 'Connected chain changed' })
-    await recordBlocked(database, requestId, 'Connected chain changed after approval request')
     throw new ApprovalError(409, 'Connected chain changed; request a fresh approval.')
   }
   const tx = buildNativeTransfer(intent)
@@ -250,7 +248,6 @@ async function approveTransfer(database, approvalId, ownerWallet, requestId) {
     })
     if (!reservation.allowed) {
       await updateApproval(database, approvalId, 'denied', { failureReason: reservation.reason })
-      await recordBlocked(database, requestId, reservation.reason)
       throw new ApprovalError(409, reservation.reason)
     }
 
@@ -344,7 +341,7 @@ async function approveTransfer(database, approvalId, ownerWallet, requestId) {
         type: 'approval.execution_failed',
         data: { approvalId, status, reason, recipient: intent.recipient, amount: intent.from.amount, token: intent.from.token },
       })
-      if (requiresFreshReview) await recordBlocked(database, requestId, reason)
+      if (/digest mismatch|nonce changed/i.test(reason)) await recordBlocked(database, requestId, reason)
     }
     if (confirmedTransaction) {
       throw new ApprovalError(
