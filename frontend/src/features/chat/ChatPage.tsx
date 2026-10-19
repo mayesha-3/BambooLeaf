@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { UserProfile } from '../../types'
+import { apiBaseUrl } from '../../config/api'
 import { authenticatedFetch } from '../../lib/device-session'
 
 interface BalanceCard { kind: 'balance'; eth: string; usdc: string; total: string; change: string; chainId?: number }
@@ -293,14 +294,12 @@ function TypingIndicator() {
 
 function ContextPanel({ width, onResizeStart, userProfile }: { width: number; onResizeStart: (e: React.MouseEvent) => void; userProfile?: UserProfile }) {
   const [walletData, setWalletData] = useState<{ balanceEth: string; balanceUsdc: string } | null>(null)
-  const apiUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
-
   useEffect(() => {
-    fetch(`${apiUrl}/wallet/balance`)
+    fetch(`${apiBaseUrl}/wallet/balance`)
       .then(res => res.json() as Promise<{ balanceEth: string; balanceUsdc: string }>)
       .then(data => setWalletData(data))
       .catch(console.error)
-  }, [apiUrl])
+  }, [])
 
   return (
     <aside className="hidden xl:flex flex-col shrink-0 border-l border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0c1220] overflow-y-auto relative transition-colors" style={{ width }}>
@@ -382,8 +381,6 @@ function ContextPanel({ width, onResizeStart, userProfile }: { width: number; on
     </aside>
   )
 }
-
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
 
 async function getAgentResponse(userText: string, untrusted?: string[]): Promise<Message> {
   const id = crypto.randomUUID()
