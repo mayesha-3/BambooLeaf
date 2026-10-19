@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   approveSupplierChange,
   createSupplier,
+  getVerifiedSupplierRecipients,
   requestSupplierChange,
 } from '../../../src/db/repositories/suppliers.repository.tsx'
 
@@ -69,4 +70,30 @@ test('supplier creation and later payout changes require a different approver fo
   const changedSupplier = await approveSupplierChange(database, supplier.supplierId, '0xoriginal-owner')
   assert.equal(changedSupplier.payoutAccount, '0x0000000000000000000000000000000000000002')
   assert.equal(changedSupplier.pendingChange, undefined)
+})
+
+test('only separately approved supplier payout addresses enter the trusted recipient list', async () => {
+  const database = createDatabase()
+  const supplier = await createSupplier(database, {
+    name: 'Verified Supplier',
+    payoutAccount: '0x0000000000000000000000000000000000000003',
+    requestedBy: '0xrequester',
+  })
+  const active = await approveSupplierChange(database, supplier.supplierId, '0xindependent-approver')
+  assert.equal(active.status, 'active')
+
+  const recipients = await getVerifiedSupplierRecipients({
+    collection() {
+      return {
+        find(filter) {
+          assert.deepEqual(filter, { status: 'active' })
+          return {
+            toArray: async () => [{ payoutAccount: active.payoutAccount }],
+          }
+        },
+      }
+    },
+  })
+
+  assert.deepEqual(recipients, ['0x0000000000000000000000000000000000000003'])
 })

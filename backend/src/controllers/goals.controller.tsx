@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { goalRequestSchema } from '../guard/intent.schema.tsx'
 import { getDatabase } from '../db/connection.tsx'
-import { submitGoal } from '../services/goals.service.tsx'
+import { getGoalHistory, submitGoal } from '../services/goals.service.tsx'
 
 async function createGoal(request, response, next) {
   const parsed = goalRequestSchema.safeParse(request.body)
@@ -17,11 +17,28 @@ async function createGoal(request, response, next) {
   }
 
   try {
-    const result = await submitGoal(getDatabase(), parsed.data.goal, idempotencyKey, parsed.data.untrusted)
+    const result = await submitGoal(
+      getDatabase(),
+      parsed.data.goal,
+      idempotencyKey,
+      parsed.data.untrusted,
+      request.deviceSession.walletAddress,
+    )
     response.status(result.statusCode).json(result.body)
   } catch (error) {
     next(error)
   }
 }
 
-export { createGoal }
+async function goalHistory(request, response, next) {
+  try {
+    response.json(await getGoalHistory(getDatabase(), {
+      walletAddress: request.deviceSession.walletAddress,
+      role: request.userRole,
+    }))
+  } catch (error) {
+    next(error)
+  }
+}
+
+export { createGoal, goalHistory }

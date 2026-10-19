@@ -1,7 +1,6 @@
 import { Contract, getAddress, parseEther, parseUnits } from 'ethers'
 import { issueGuardAuthorization } from './guard-auth.tsx'
-import { getToken } from '../chain/token-registry.tsx'
-import { buildSwapTransactions } from '../chain/transaction-builder.tsx'
+import { buildSwapTransactions, getSwapTokenRoute } from '../chain/transaction-builder.tsx'
 
 const swapRouterAbi = ['function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)']
 let runtimeOverrides = {}
@@ -77,9 +76,8 @@ async function evaluateSwap(intent, { provider, recipient, config }) {
   }
 
   try {
-    const tokenIn = getToken(intent.from.token, intent.chainId)
-    const tokenOut = getToken(intent.to.token, intent.chainId)
-    const amountIn = parseUnits(intent.from.amount, tokenIn.decimals)
+    const { tokenIn, tokenOut, nativeInput } = getSwapTokenRoute(intent)
+    const amountIn = parseUnits(intent.from.amount, nativeInput ? 18 : tokenIn.decimals)
     if (!config.maxSwapInputAmount) {
       return { allowed: false, reason: 'MAX_SWAP_INPUT_AMOUNT must be configured before swaps are enabled.' }
     }
@@ -101,11 +99,12 @@ async function evaluateSwap(intent, { provider, recipient, config }) {
       quotedAmountOut,
       maxSlippageBps: intent.maxSlippageBps,
     })
+    const transactionValue = built.swap.value.toString()
     const authorization = issueGuardAuthorization({
       chainId: intent.chainId,
       intentId: intent.intentId,
       recipient: getAddress(recipient),
-      valueWei: '0',
+      valueWei: transactionValue,
       transactionTo: built.swap.to,
       transactionData: built.swap.data,
     })

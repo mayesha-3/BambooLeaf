@@ -3,7 +3,7 @@ import { JsonRpcProvider, Wallet, parseEther, Contract, parseUnits } from 'ether
 
 async function main() {
   const forkUrl = process.env.SHADOW_RPC_URL
-  if (!forkUrl) throw new Error('SHADOW_FORK_RPC_URL is not set')
+  if (!forkUrl) throw new Error('SHADOW_RPC_URL is not set')
 
   const provider = new JsonRpcProvider(forkUrl)
 

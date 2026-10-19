@@ -12,7 +12,7 @@ import {
   recordCleanExecution,
 } from '../guard/autonomy-manager.tsx'
 import { saveAutonomyState } from '../db/repositories/autonomy.repository.tsx'
-import { createTransferApproval } from './approvals.service.tsx'
+import { createSwapApproval, createTransferApproval } from './approvals.service.tsx'
 import { reserveTransfer } from '../db/repositories/policy-usage.repository.tsx'
 import { getSigner, getSignerAddress, sendAuthorizedNativeTransfer, sendAuthorizedSwap, simulateAuthorizedSwap } from '../signer/signer-service.tsx'
 import { getToken } from '../chain/token-registry.tsx'
@@ -173,19 +173,40 @@ async function processSwap(database, intent, summary, policy, requestId) {
     if (tier.tier === 'T3') {
       await recordBlocked(database, requestId, tier.reasons.join('; '))
     }
+    let approval = null
+    if (tier.tier === 'T2') {
+      try {
+        approval = await createSwapApproval(database, intent, requestId)
+      } catch (error) {
+        await appendAuditEvent(database, {
+          requestId,
+          type: 'approval.creation_failed',
+          data: { ...summary, reason: error instanceof Error ? error.message : 'Unable to create swap approval request' },
+        })
+        return {
+          statusCode: error.statusCode || 503,
+          body: {
+            requestId,
+            status: 'not_executed',
+            intent: summary,
+            error: error instanceof Error ? error.message : 'Unable to create swap approval request.',
+          },
+        }
+      }
+    }
     await appendAuditEvent(database, {
       requestId, type: tier.tier === 'T2' ? 'approval.required' : 'policy.denied',
-      data: { ...summary, tier: tier.tier, reasons: tier.reasons, approvalAvailable: false },
+      data: { ...summary, tier: tier.tier, reasons: tier.reasons, ...(approval ? { approvalId: approval.approvalId } : {}) },
     })
     return {
-      statusCode: 200,
+      statusCode: approval ? 202 : 200,
       body: {
         requestId,
         status,
         tier: tier.tier,
         intent: summary,
         reasons: tier.reasons,
-        ...(tier.tier === 'T2' ? { approvalAvailable: false, reason: 'Human approval is not enabled for swaps.' } : {}),
+        ...(approval ? { approvalId: approval.approvalId, expiresAt: approval.expiresAt } : {}),
       },
     }
   }
@@ -589,7 +610,94 @@ async function submitVerifiedSupplierPayment(database, invoiceId, requestId) {
   )
 }
 
-async function submitGoal(database, goal, idempotencyKey, untrusted?: string[]) {
+async function getGoalHistory(
+  database,
+  { walletAddress, role }: { walletAddress?: string; role?: string } = {},
+) {
+  const filter: Record<string, unknown> = { 'body.intent.action': { $in: ['transfer', 'swap'] } }
+  if (role === 'clerk' && walletAddress) filter.requestedBy = walletAddress
+  const records = await database.collection(COLLECTIONS.goals)
+    .find(filter, {
+      projection: { _id: 0, requestId: 1, body: 1, createdAt: 1 },
+    })
+    .sort({ createdAt: -1 })
+    .limit(200)
+    .toArray() as Array<{
+      requestId: string
+      body: Record<string, any>
+      createdAt: Date
+    }>
+  const approvalIds = records.flatMap(({ body }) => {
+    const id = body?.approval?.id || body?.approvalId
+    return typeof id === 'string' ? [id] : []
+  })
+  const approvals = approvalIds.length
+    ? await database.collection(COLLECTIONS.approvals)
+      .find({ approvalId: { $in: approvalIds } }, {
+        projection: { _id: 0, approvalId: 1, status: 1, txHash: 1, failureReason: 1, minimumOutput: 1, expiresAt: 1 },
+      })
+      .toArray()
+    : []
+  const typedApprovals = approvals as Array<{
+    approvalId: string
+    status: string
+    txHash?: string
+    failureReason?: string
+    minimumOutput?: string
+    expiresAt?: number
+  }>
+  const expiredApprovals = typedApprovals.filter((approval) =>
+    approval.status === 'pending' && approval.expiresAt <= Date.now())
+  await Promise.all(expiredApprovals.map(async (approval) => {
+    await database.collection(COLLECTIONS.approvals).updateOne(
+      { approvalId: approval.approvalId, status: 'pending', expiresAt: { $lte: Date.now() } },
+      { $set: { status: 'expired', updatedAt: new Date() } },
+    )
+    approval.status = 'expired'
+  }))
+  const approvalById = new Map(typedApprovals.map((approval) => [approval.approvalId, approval]))
+  const transactions = records.map(({ requestId, body, createdAt }) => {
+    const intent = body.intent
+    const approvalId = body.approval?.id || body.approvalId
+    const approval = approvalId ? approvalById.get(approvalId) : undefined
+    const resultStatus = body.status
+    let status
+    if (resultStatus === 'success' || resultStatus === 'confirmed' || approval?.status === 'approved') {
+      status = 'success'
+    } else if (resultStatus === 'approval_required' && ['pending', 'executing'].includes(approval?.status)) {
+      status = 'pending'
+    } else {
+      status = 'blocked'
+    }
+    return {
+      id: requestId,
+      requestId,
+      type: intent.action === 'swap' ? 'swap' : 'send',
+      to: intent.recipient || '',
+      amount: intent.amount || '',
+      asset: intent.token || '',
+      toAsset: intent.targetToken || '',
+      toAmount: approval?.minimumOutput || '',
+      status,
+      state: approval?.status || resultStatus || 'unknown',
+      timestamp: createdAt,
+      txHash: approval?.txHash || body.txHash || '',
+      approvalId: approvalId || '',
+      error: body.error || body.reason || approval?.failureReason || '',
+    }
+  })
+  return {
+    transactions,
+    summary: {
+      completed: transactions.filter((transaction) => transaction.status === 'success').length,
+      blocked: transactions.filter((transaction) => transaction.status === 'blocked').length,
+      pending: transactions.filter((transaction) => transaction.status === 'pending').length,
+      counted: transactions.length,
+    },
+  }
+}
+
+async function submitGoal(database, goal, idempotencyKey, untrusted?: string[], requestedBy?: string) {
   const goals = database.collection(COLLECTIONS.goals)
   const requestId = randomUUID()
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
@@ -598,6 +706,7 @@ async function submitGoal(database, goal, idempotencyKey, untrusted?: string[]) 
     await goals.insertOne({
       idempotencyKey,
       requestId,
+      ...(requestedBy ? { requestedBy } : {}),
       status: 'processing',
       createdAt: new Date(),
       expiresAt,
@@ -605,6 +714,9 @@ async function submitGoal(database, goal, idempotencyKey, untrusted?: string[]) 
   } catch (error) {
     if (error.code !== 11000) throw error
     const existing = await goals.findOne({ idempotencyKey })
+    if (requestedBy && existing?.requestedBy !== requestedBy) {
+      return { statusCode: 409, body: { requestId: existing?.requestId, status: 'not_executed', error: 'Idempotency-Key is already associated with another request.' } }
+    }
     if (existing?.body) {
       return { statusCode: existing.statusCode, body: existing.body }
     }
@@ -627,4 +739,4 @@ async function submitGoal(database, goal, idempotencyKey, untrusted?: string[]) 
   }
 }
 
-export { processGoal, submitGoal, submitVerifiedSupplierPayment }
+export { getGoalHistory, processGoal, submitGoal, submitVerifiedSupplierPayment }

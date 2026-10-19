@@ -89,6 +89,7 @@ test('simulateShadowFork captures token deltas, events and called addresses, the
   let txCount = 0
   const provider = {
     getNetwork: async () => ({ chainId: 31337n }),
+    getBalance: async () => 1_000n - BigInt(txCount * 20),
     call: async ({ to, data }: { to: string; data: string }) => {
       const parsed = balanceAbi.parseTransaction({ data })
       const value = balances.get(`${to}:${String(parsed?.args[0])}`) ?? 0n
@@ -112,6 +113,8 @@ test('simulateShadowFork captures token deltas, events and called addresses, the
     waitForTransaction: async (_hash: string) => ({
       hash: _hash,
       status: 1,
+      gasUsed: 10n,
+      gasPrice: 2n,
       logs: txCount === 1
         ? [{ ...eventAbi.encodeEventLog(eventAbi.getEvent('Approval')!, [sender, router, 100n]), address: tokenIn }]
         : [{ ...eventAbi.encodeEventLog(eventAbi.getEvent('Transfer')!, [sender, router, 10n]), address: tokenIn }],
@@ -127,6 +130,7 @@ test('simulateShadowFork captures token deltas, events and called addresses, the
   assert.equal(result.reverted, true)
   assert.equal(result.balanceDeltas[`${tokenIn}:${sender}`], -10n)
   assert.equal(result.balanceDeltas[`${tokenOut}:${sender}`], 10n)
+  assert.equal(result.nativeBalanceDeltas[sender], 0n)
   assert.deepEqual(result.events.map((event) => event.type), ['Approval', 'Transfer'])
   assert.deepEqual(result.calledAddresses, [router, pair])
   assert.equal(methods.at(-1), 'evm_revert')

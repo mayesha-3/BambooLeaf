@@ -22,8 +22,19 @@ interface ApprovalItem {
   tier: 'Tier 2 · Owner Approval Required' | 'Tier 3 · High Value Multi-sig'
 }
 
+interface SupplierApprovalItem {
+  supplierId: string
+  name: string
+  payoutAccount: string
+  status: string
+  requestedBy: string
+  pendingChange?: { name: string; payoutAccount: string; requestedBy: string }
+}
+
 export default function ApprovalsPage() {
   const [items, setItems] = useState<ApprovalItem[]>([])
+  const [supplierItems, setSupplierItems] = useState<SupplierApprovalItem[]>([])
+  const [role, setRole] = useState('')
   const [now, setNow] = useState(0)
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState('')
@@ -39,9 +50,14 @@ export default function ApprovalsPage() {
       return
     }
     try {
-      const response = await authenticatedFetch(`${apiBaseUrl}/approvals`, {
+      const [response, supplierResponse] = await Promise.all([
+        authenticatedFetch(`${apiBaseUrl}/approvals`, {
         headers: { Authorization: `Bearer ${token}` },
-      })
+        }),
+        authenticatedFetch(`${apiBaseUrl}/suppliers`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ])
       const payload = await response.json() as {
         approvals?: Array<{
           approvalId: string
@@ -49,27 +65,42 @@ export default function ApprovalsPage() {
           chainId: number
           nonce: number
           expiresAt: number
-          intent: { action: string; from: { token: string; amount?: string }; recipient: string }
+          recipient?: string
+          minimumOutput?: string
+          intent: { action: string; from: { token: string; amount?: string }; to?: { token: string }; recipient?: string }
           reasons: string[]
         }>
         error?: string
       }
       if (!response.ok) throw new Error(payload.error || `Approval request failed (${response.status})`)
+      const supplierPayload = await supplierResponse.json() as {
+        suppliers?: SupplierApprovalItem[]
+        role?: string
+        error?: string
+      }
+      if (!supplierResponse.ok) throw new Error(supplierPayload.error || `Supplier approval request failed (${supplierResponse.status})`)
       setItems((payload.approvals || []).map((item) => ({
         id: item.approvalId,
         chainId: item.chainId,
         nonce: item.nonce,
         expiresAt: item.expiresAt,
-        action: 'Transfer ETH',
+        action: item.intent.action === 'swap'
+          ? `Swap ${item.intent.from.token} → ${item.intent.to?.token ?? 'token'}`
+          : `Transfer ${item.intent.from.token}`,
         amount: `${item.intent.from.amount ?? '—'} ${item.intent.from.token}`,
-        receive: 'Native ETH transfer',
-        recipient: item.intent.recipient,
+        receive: item.intent.action === 'swap'
+          ? `At least ${item.minimumOutput ?? '—'} ${item.intent.to?.token ?? ''}`
+          : 'Native ETH transfer',
+        recipient: item.recipient || item.intent.recipient || 'Agent wallet',
         risk: 'Digest-bound approval',
         reason: item.reasons.join('; '),
         tone: 'amber',
         digest: item.digest,
         tier: 'Tier 2 · Owner Approval Required',
       })))
+      setSupplierItems((supplierPayload.suppliers || []).filter((supplier) =>
+        supplier.status === 'pending_approval' || Boolean(supplier.pendingChange)))
+      setRole(supplierPayload.role || '')
       setError('')
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load approval requests.')
@@ -126,6 +157,25 @@ export default function ApprovalsPage() {
       setBusyId('')
     }
   }
+  async function approveSupplier(supplier: SupplierApprovalItem) {
+    setBusyId(supplier.supplierId)
+    setError('')
+    try {
+      const response = await authenticatedFetch(`${apiBaseUrl}/suppliers/${supplier.supplierId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      })
+      const payload = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(payload.error || `Supplier approval failed (${response.status})`)
+      setNotice({ message: `Supplier ${supplier.pendingChange?.name || supplier.name} verified for payments.`, tone: 'green' })
+      await loadApprovals()
+    } catch (approvalError) {
+      setError(approvalError instanceof Error ? approvalError.message : 'Unable to approve supplier.')
+    } finally {
+      setBusyId('')
+    }
+  }
   const activeItems = items.filter((item) => item.expiresAt > now)
 
   return (
@@ -145,7 +195,7 @@ export default function ApprovalsPage() {
       <div className="mb-6 flex items-start gap-3 rounded-2xl border border-blue-100 dark:border-blue-900/50 bg-blue-50/70 dark:bg-blue-950/40 p-4">
         <Icon name="eye" size={17} className="mt-0.5 shrink-0 text-blue-700 dark:text-blue-400" />
         <p className="text-xs leading-5 text-blue-900 dark:text-blue-200">
-          <span className="font-bold">Explain before sign.</span> Only native ETH transfers can be approved here. Each digest expires after two minutes, and authorizing it immediately submits the exact reviewed transaction after the signer rechecks its chain, nonce, and policy.
+          <span className="font-bold">Explain before sign.</span> Native ETH transfers and token swaps can be approved here. Each digest expires after two minutes, and authorizing it submits the exact reviewed transaction after the signer rechecks its chain, nonce, simulation, and policy.
         </p>
       </div>
 
@@ -165,7 +215,47 @@ export default function ApprovalsPage() {
         </div>
       )}
 
-      {activeItems.length ? (
+      {supplierItems.length > 0 && (
+        <section className="mb-6 space-y-3" aria-label="Supplier registry approvals">
+          <h2 className="text-sm font-bold text-slate-900 dark:text-white">Supplier registry approvals</h2>
+          <p className="text-xs text-slate-500">These requests verify supplier payout details; they are separate from transaction approvals.</p>
+          {supplierItems.map((supplier) => {
+            const change = supplier.pendingChange
+            const requester = change?.requestedBy || supplier.requestedBy
+            return (
+              <Card key={supplier.supplierId} className="p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">{change?.name || supplier.name}</h3>
+                    <p className="mt-1 break-all font-mono text-xs text-slate-500">{change?.payoutAccount || supplier.payoutAccount}</p>
+                    <p className="mt-2 text-xs text-slate-500">Requested by {requester}. A different approver must verify this destination.</p>
+                  </div>
+                  {role === 'approver' ? (
+                    <button
+                      type="button"
+                      disabled={busyId === supplier.supplierId}
+                      onClick={() => void approveSupplier(supplier)}
+                      className="rounded-full bg-lime-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-60"
+                    >
+                      {busyId === supplier.supplierId ? 'Approving…' : 'Verify supplier'}
+                    </button>
+                  ) : (
+                    <div className="text-right">
+                      <Badge tone="amber">Needs separate approver</Badge>
+                      <p className="mt-2 max-w-xs text-xs text-slate-500">
+                        Assign another wallet as an approver in Device Security, then sign in with that wallet to verify this supplier.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            )
+          })}
+        </section>
+      )}
+
+      {activeItems.length || supplierItems.length ? (
+        activeItems.length ? (
         <div className="space-y-4">
           {activeItems.map((item) => (
             <Card key={item.id} className="p-6 transition hover:border-slate-300 dark:hover:border-slate-700">
@@ -267,6 +357,7 @@ export default function ApprovalsPage() {
             </Card>
           ))}
         </div>
+        ) : null
       ) : (
         <Card className="p-16 text-center">
           <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-lime-50 dark:bg-lime-950/50 text-[#65A30D] dark:text-lime-400">

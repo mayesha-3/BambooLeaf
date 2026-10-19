@@ -10,6 +10,8 @@ const erc20Interface = new Interface(ERC20_ABI)
 const approvalInterface = new Interface(['function approve(address spender, uint256 amount) returns (bool)'])
 export const routerInterface = new Interface([
   'function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) returns (uint256[] amounts)',
+  'function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) returns (uint256[] amounts)',
+  'function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)',
   'function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)',
 ])
 
@@ -35,11 +37,28 @@ type BuiltSwap = {
   quotedAmountOut: bigint
   minAmountOut: bigint
   slippageBps: number
-  approval: BuiltTransaction
+  approval: BuiltTransaction | null
   swap: BuiltTransaction
+  nativeInput: boolean
+  nativeOutput: boolean
 }
 
-// 2. Build Swap (Existing)
+function getSwapTokenRoute(intent: any) {
+  if (intent.action !== 'swap' || !intent.from?.token || !intent.to?.token) {
+    throw new Error('Swap intent must include input and output tokens')
+  }
+  const nativeInput = isNativeToken(intent.from.token)
+  const nativeOutput = isNativeToken(intent.to.token)
+  if (nativeInput && nativeOutput) throw new Error('Swap input and output tokens must be different')
+
+  const tokenIn = getToken(nativeInput ? 'WETH' : intent.from.token, intent.chainId)
+  const tokenOut = getToken(nativeOutput ? 'WETH' : intent.to.token, intent.chainId)
+  if (tokenIn.address.toLowerCase() === tokenOut.address.toLowerCase()) {
+    throw new Error('Swap input and output tokens must be different')
+  }
+  return { tokenIn, tokenOut, nativeInput, nativeOutput }
+}
+
 function buildSwapTransactions(intent: any, {
   routerAddress,
   recipient,
@@ -56,9 +75,6 @@ function buildSwapTransactions(intent: any, {
   if (intent.action !== 'swap' || !intent.to?.token || !intent.from.amount) {
     throw new Error('Swap intent must include an input amount and output token')
   }
-  if (isNativeToken(intent.from.token) || isNativeToken(intent.to.token)) {
-    throw new Error('Native-token swaps are not supported; use ERC-20 tokens such as WETH')
-  }
   if (!Number.isInteger(maxSlippageBps) || maxSlippageBps < 0 || maxSlippageBps > 500) {
     throw new Error('Slippage must be between 0 and 500 basis points')
   }
@@ -66,12 +82,8 @@ function buildSwapTransactions(intent: any, {
     throw new Error('Swap quote or deadline is invalid')
   }
 
-  const tokenIn = getToken(intent.from.token, intent.chainId)
-  const tokenOut = getToken(intent.to.token, intent.chainId)
-  if (tokenIn.address.toLowerCase() === tokenOut.address.toLowerCase()) {
-    throw new Error('Swap input and output tokens must be different')
-  }
-  const amountIn = parseUnits(intent.from.amount, tokenIn.decimals)
+  const { tokenIn, tokenOut, nativeInput, nativeOutput } = getSwapTokenRoute(intent)
+  const amountIn = parseUnits(intent.from.amount, nativeInput ? 18 : tokenIn.decimals)
   const minAmountOut = quotedAmountOut * BigInt(10_000 - maxSlippageBps) / 10_000n
   if (amountIn <= 0n || minAmountOut < 0n) {
     throw new Error('Swap input amount must be greater than zero')
@@ -79,6 +91,15 @@ function buildSwapTransactions(intent: any, {
 
   const router = getAddress(routerAddress)
   const to = getAddress(recipient)
+  const path = [tokenIn.address, tokenOut.address]
+  const functionName = nativeInput
+    ? 'swapExactETHForTokens'
+    : nativeOutput
+      ? 'swapExactTokensForETH'
+      : 'swapExactTokensForTokens'
+  const args = nativeInput
+    ? [minAmountOut, path, to, deadline]
+    : [amountIn, minAmountOut, path, to, deadline]
   return {
     router,
     tokenIn: tokenIn.address,
@@ -87,17 +108,13 @@ function buildSwapTransactions(intent: any, {
     quotedAmountOut,
     minAmountOut,
     slippageBps: maxSlippageBps,
-    approval: buildErc20Approval(tokenIn.address, router, amountIn),
+    approval: nativeInput ? null : buildErc20Approval(tokenIn.address, router, amountIn),
+    nativeInput,
+    nativeOutput,
     swap: {
       to: router,
-      value: 0n,
-      data: routerInterface.encodeFunctionData('swapExactTokensForTokens', [
-        amountIn,
-        minAmountOut,
-        [tokenIn.address, tokenOut.address],
-        to,
-        deadline,
-      ]),
+      value: nativeInput ? amountIn : 0n,
+      data: routerInterface.encodeFunctionData(functionName, args),
     },
   }
 }
@@ -168,12 +185,11 @@ export async function buildTxRequests(intent: any, ctx: any): Promise<TxRequest[
   if (intent.action === 'swap') {
     const { provider } = ctx
     const router = ctx.policy.swapRouterAddress
-    const tokenIn = getToken(intent.from.token, intent.chainId)
-    const tokenOut = getToken(intent.to.token, intent.chainId)
+    const { tokenIn, tokenOut, nativeInput } = getSwapTokenRoute(intent)
     
     // Fetch live quote from Uniswap
     const routerContract = new Contract(router, routerInterface, provider)
-    const amountIn = parseUnits(intent.from.amount, tokenIn.decimals)
+    const amountIn = parseUnits(intent.from.amount, nativeInput ? 18 : tokenIn.decimals)
     const amounts = await routerContract.getAmountsOut(amountIn, [tokenIn.address, tokenOut.address])
     const quotedAmountOut = BigInt(amounts[1])
 
@@ -185,12 +201,12 @@ export async function buildTxRequests(intent: any, ctx: any): Promise<TxRequest[
     })
 
     return [
-      { ...approval, description: `Approve ${intent.from.amount} ${intent.from.token}` },
-      { ...swap, description: `Swap ${intent.from.amount} ${intent.from.token} to ${intent.to.token}` }
+      ...(approval ? [{ ...approval, description: `Approve ${intent.from.amount} ${intent.from.token}` }] : []),
+      { ...swap, description: `Swap ${intent.from.amount} ${intent.from.token} to ${intent.to.token}` },
     ]
   }
 
   throw new Error(`Unsupported action for tx builder: ${intent.action}`)
 }
 
-export { buildNativeTransfer, buildErc20Approval, buildErc20Transfer, buildSwapTransactions, buildTransaction }
+export { buildNativeTransfer, buildErc20Approval, buildErc20Transfer, buildSwapTransactions, buildTransaction, getSwapTokenRoute }

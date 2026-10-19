@@ -12,8 +12,15 @@ type RichCard = BalanceCard | TransactionCard | PolicyCard | ApprovalCard | Swap
 type MessageRole = 'user' | 'agent' | 'system'
 interface ToolCall { name: string; status: 'running' | 'done' | 'failed'; detail?: string }
 interface Message { id: string; role: MessageRole; text?: string; untrusted?: string[]; cards?: RichCard[]; toolCalls?: ToolCall[]; ts: Date }
-interface GoalIntentSummary { action?: string; amount?: string | null; token?: string; recipient?: string | null }
+interface GoalIntentSummary {
+  action?: string
+  amount?: string | null
+  token?: string
+  recipient?: string | null
+  targetToken?: string | null
+}
 interface GoalApiResponse {
+  requestId?: string
   status?: string
   txHash?: string
   reason?: string
@@ -22,6 +29,7 @@ interface GoalApiResponse {
   intent?: GoalIntentSummary
   data?: { balanceEth?: string; balanceUsdc?: string; chainId?: number }
   approvalId?: string
+  expiresAt?: number
   approval?: { id?: string; digest?: string; expiresAt?: number }
 }
 
@@ -411,15 +419,29 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
 
       if (data.status === 'approval_required') {
         const approvalId = data.approvalId || data.approval?.id
+        if (!approvalId) {
+          return {
+            id, role: 'agent',
+            text: 'The request needs human approval, but it could not be added to the Approval Queue. No transaction was executed. Please try again or check the backend.',
+            toolCalls: [{ name: 'approvals.create()', status: 'failed' as const, detail: 'Missing approval ID' }],
+            cards: [{ kind: 'transaction', status: 'blocked', type: 'Approval request not queued', amount: `${data.intent?.amount ?? ''} ${data.intent?.token ?? ''}`.trim(), to: 'Approval Queue', reason: 'No approval record was created; nothing was executed.' } as TransactionCard],
+            ts: new Date(),
+          }
+        }
+        const expiresInMinutes = data.expiresAt
+          ? Math.max(1, Math.ceil((data.expiresAt - Date.now()) / 60000))
+          : 2
         return {
           id, role: 'agent',
           text: `This transaction requires your manual approval (T2).`,
           toolCalls: [{ name: 'policy.validate(intent)', status: 'done' as const, detail: 'T2 required' }],
           cards: [{ 
             kind: 'approval', 
-            description: `Transaction to ${data.intent?.recipient || 'recipient'}`, 
+            description: data.intent?.action === 'swap'
+              ? `Swap ${data.intent?.token || ''} to ${data.intent?.targetToken || 'token'}`
+              : `Transaction to ${data.intent?.recipient || 'recipient'}`,
             amount: `${data.intent?.amount} ${data.intent?.token}`, 
-            expires: 'in 5 min',
+            expires: `in ${expiresInMinutes} min`,
             approvalId
           } as ApprovalCard],
           ts: new Date(),
@@ -446,6 +468,26 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
         }
       }
 
+      if (data.status === 'not_executed' || data.error) {
+        const reason = data.error || data.reason || 'The backend did not execute this request.'
+        return {
+          id, role: 'agent',
+          text: `⚠ Request not executed: ${reason}`,
+          toolCalls: [{ name: 'agent.process()', status: 'failed' as const, detail: data.status || `HTTP ${res.status}` }],
+          cards: [{
+            kind: 'transaction',
+            status: 'blocked',
+            type: 'Request not executed',
+            amount: data.intent?.amount ? `${data.intent.amount} ${data.intent.token || ''}`.trim() : '',
+            to: data.intent?.action === 'swap'
+              ? `${data.intent.token || 'Token'} → ${data.intent.targetToken || 'token'}`
+              : data.intent?.recipient || 'Transaction',
+            reason: `${reason}${data.requestId ? ` (Request ID: ${data.requestId})` : ''}`,
+          } as TransactionCard],
+          ts: new Date(),
+        }
+      }
+
       if (data.txHash || data.status === 'confirmed' || data.status === 'success') {
         return {
           id, role: 'agent',
@@ -459,6 +501,15 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
         }
       }
     }
+
+    if (!res.ok) {
+      return {
+        id, role: 'agent',
+        text: `⚠ Request failed (HTTP ${res.status}). The backend returned no readable error details.`,
+        toolCalls: [{ name: 'agent.process()', status: 'failed' as const, detail: `HTTP ${res.status}` }],
+        ts: new Date(),
+      }
+    }
   } catch (error) {
     return {
       id, role: 'agent',
@@ -470,8 +521,8 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
   
   return {
     id, role: 'agent',
-    text: `I couldn't process that request.`,
-    toolCalls: [{ name: 'agent.process()', status: 'failed' as const, detail: 'Unknown response' }],
+    text: `⚠ The backend returned an unrecognized response. No success or transaction confirmation was received.`,
+    toolCalls: [{ name: 'agent.process()', status: 'failed' as const, detail: 'Unrecognized backend response' }],
     ts: new Date(),
   }
 }
