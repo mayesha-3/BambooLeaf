@@ -2,7 +2,6 @@ import { useState, useMemo, useEffect } from 'react'
 import Icon from '../components/ui/Icon'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
-import GoalComposer from '../components/GoalComposer'
 import LiveRatesConverterCard from '../features/market/LiveRatesConverterCard'
 import { apiBaseUrl } from '../config/api'
 import type { AuditState, Page, UserProfile } from '../types'
@@ -66,6 +65,7 @@ export default function OverviewPage({
   const [chartPeriod, setChartPeriod] = useState<'7d' | '30d' | '90d'>('7d')
   const [chartType, setChartType] = useState<'bar' | 'line'>('bar')
   const [selectedDayIndex, setSelectedDayIndex] = useState<number>(6)
+  const [activeCardIndex, setActiveCardIndex] = useState<number>(0)
 
   // Fetch Live Wallet Balance
   useEffect(() => {
@@ -161,30 +161,6 @@ export default function OverviewPage({
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         {/* ================= LEFT & CENTER (8 COLUMNS) ================= */}
         <div className="xl:col-span-8 space-y-6">
-          {/* Ask BambooLeaf */}
-          <Card className="overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-6 border-b border-slate-100 dark:border-slate-800/80 pb-4">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-2xl bg-lime-50 dark:bg-lime-950/50 text-[#65A30D] dark:text-lime-400 flex items-center justify-center">
-                  <Icon name="spark" size={18} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    Ask BambooLeaf
-                  </h3>
-                  <p className="text-xs text-slate-400 dark:text-slate-400">
-                    Describe a goal. Guardrails always validate deterministically.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => onNavigate("policy")}
-                className="text-xs font-bold text-slate-500 hover:text-[#65A30D] dark:text-slate-400 dark:hover:text-lime-400 flex items-center gap-1">
-                Policy rules apply <Icon name="chevron" size={13} />
-              </button>
-            </div>
-            <GoalComposer onSubmitted={() => onNavigate("activity")} />
-          </Card>
 
           {/* Hero Balance Chart */}
           <Card className="p-6 sm:p-7">
@@ -416,43 +392,116 @@ export default function OverviewPage({
               </button>
             </div>
 
-            {/* Bank Card UI */}
+            {/* Ultra-Realistic Bank Card Widget */}
             <div className="relative pt-1 pb-2">
               <div className="flex gap-3 items-center">
-                <div className="w-full max-w-[340px] aspect-[1.586/1] shrink-0 rounded-[18px] p-5 text-white relative overflow-hidden border border-white/30 shadow-xl flex flex-col justify-between" style={{ background: "linear-gradient(135deg, #82C91E 0%, #65A30D 48%, #497409 100%)" }}>
-                  <div className="flex justify-between items-start z-10">
-                    <span className="text-[11px] font-semibold tracking-wider text-lime-50/90 uppercase">Agent wallet</span>
-                    <span className="text-2xl font-black italic tracking-tighter text-white font-serif">EVM</span>
-                  </div>
-                  <div className="z-10 mt-1">
-                    <p className="font-mono text-[16px] sm:text-[17px] tracking-[0.22em] text-white font-bold select-none">
-                      {walletAddress ? `${walletAddress.slice(0, 10)}…${walletAddress.slice(-8)}` : 'Wallet address unavailable'}
-                    </p>
-                  </div>
-                  <div className="flex justify-between items-end z-10 pt-1">
-                    <div>
-                      <p className="text-[8px] font-bold uppercase tracking-[0.15em] text-lime-200/80">Cardholder</p>
-                      <p className="text-xs font-bold tracking-wider text-white uppercase">{displayCardName}</p>
+                {/* Active Card Container */}
+                {activeCardIndex === 0 ? (
+                  /* Primary: Realistic Lime-Green Satin Polymer Debit Card */
+                  <div
+                    onClick={() => setActiveCardIndex(0)}
+                    className="w-full max-w-[340px] aspect-[1.586/1] shrink-0 rounded-[18px] p-5 text-white relative overflow-hidden transition-all duration-300 cursor-pointer select-none border border-white/30 shadow-[0_20px_40px_-8px_rgba(101,163,13,0.45),0_8px_16px_-4px_rgba(0,0,0,0.12)] hover:shadow-[0_24px_48px_-6px_rgba(101,163,13,0.55),0_10px_20px_rgba(0,0,0,0.15)] flex flex-col justify-between"
+                    style={{ background: "linear-gradient(135deg, #82C91E 0%, #65A30D 48%, #497409 100%)" }}>
+                    {/* Specular Gloss Sheen */}
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/20 to-transparent pointer-events-none" />
+                    <div className="flex justify-between items-start z-10">
+                      <div className="flex items-center gap-2">
+                        {/* EMV Smart Chip */}
+                        <div className="w-[45px] h-[33px] rounded-md bg-gradient-to-br from-[#FFE898] via-[#F4C430] to-[#A36A00] p-[2px] shadow-[inset_0_1px_2px_rgba(255,255,255,0.7),0_2px_4px_rgba(0,0,0,0.35)] relative overflow-hidden border border-[#8C5800]">
+                          <div className="w-full h-full border border-[#6E4200]/40 rounded-[3px] flex flex-col justify-between p-1 bg-gradient-to-tr from-amber-400/20 to-yellow-200/30">
+                            <div className="flex justify-between items-center h-full">
+                              <div className="w-3.5 h-full border-r border-[#6E4200]/40 flex flex-col justify-around">
+                                <div className="w-full h-[1px] bg-[#6E4200]/40" />
+                                <div className="w-full h-[1px] bg-[#6E4200]/40" />
+                              </div>
+                              <div className="w-2.5 h-2.5 rounded-full border border-[#6E4200]/50 bg-gradient-to-br from-yellow-100 to-amber-300" />
+                              <div className="w-3.5 h-full border-l border-[#6E4200]/40 flex flex-col justify-around">
+                                <div className="w-full h-[1px] bg-[#6E4200]/40" />
+                                <div className="w-full h-[1px] bg-[#6E4200]/40" />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        {/* Hologram Patch */}
+                        <div className="w-7 h-5 rounded-[4px] bg-gradient-to-tr from-cyan-300 via-pink-400 to-amber-200 opacity-90 shadow-inner flex items-center justify-center p-0.5 border border-white/50">
+                          <div className="w-full h-full bg-white/20 rounded-[2px] flex items-center justify-center text-[6px] font-black text-slate-800 tracking-tighter">FINE</div>
+                        </div>
+                      </div>
+                      <span className="text-2xl font-black italic tracking-tighter text-white font-serif">EVM</span>
                     </div>
-                    <div className="text-left">
-                      <p className="text-[8px] font-bold uppercase tracking-[0.15em] text-lime-200/80">Chain ID</p>
-                      <p className="text-xs font-mono font-bold text-white">{walletState.balance?.chainId ?? '—'}</p>
+                    <div className="z-10 mt-1">
+                      <p className="font-mono text-[16px] sm:text-[17px] tracking-[0.22em] text-white font-bold select-none">
+                        {walletAddress ? `${walletAddress.slice(0, 10)}…${walletAddress.slice(-8)}` : 'Wallet address unavailable'}
+                      </p>
+                    </div>
+                    <div className="flex justify-between items-end z-10 pt-1">
+                      <div>
+                        <p className="text-[8px] font-bold uppercase tracking-[0.15em] text-lime-200/80">Cardholder</p>
+                        <p className="text-xs font-bold tracking-wider text-white uppercase">{displayCardName}</p>
+                      </div>
+                      <div className="text-left">
+                        <p className="text-[8px] font-bold uppercase tracking-[0.15em] text-lime-200/80">Chain ID</p>
+                        <p className="text-xs font-mono font-bold text-white">{walletState.balance?.chainId ?? '—'}</p>
+                      </div>
                     </div>
                   </div>
+                ) : (
+                  /* Secondary: Brushed Obsidian Titanium Card */
+                  <div
+                    onClick={() => setActiveCardIndex(1)}
+                    className="w-full max-w-[340px] aspect-[1.586/1] shrink-0 rounded-[18px] p-5 text-white relative overflow-hidden transition-all duration-300 cursor-pointer select-none border border-slate-700/60 shadow-[0_20px_40px_-8px_rgba(15,23,42,0.6),0_8px_16px_rgba(0,0,0,0.3)] flex flex-col justify-between"
+                    style={{ background: "linear-gradient(135deg, #2D3748 0%, #1A202C 50%, #0F172A 100%)" }}>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-transparent pointer-events-none" />
+                    <div className="flex justify-between items-start z-10">
+                      <span className="text-[11px] font-semibold tracking-wider text-slate-400/80 uppercase">Credit Card</span>
+                      <span className="text-2xl font-black italic tracking-tighter text-slate-300 font-serif">EVM</span>
+                    </div>
+                    <div className="z-10 mt-1">
+                      <p className="font-mono text-[16px] sm:text-[17px] tracking-[0.22em] text-slate-200 font-bold select-none">
+                        {walletAddress ? `${walletAddress.slice(0, 10)}…${walletAddress.slice(-8)}` : 'Wallet address unavailable'}
+                      </p>
+                    </div>
+                    <div className="flex justify-between items-end z-10 pt-1">
+                      <div>
+                        <p className="text-[8px] font-bold uppercase tracking-[0.15em] text-slate-500">Cardholder</p>
+                        <p className="text-xs font-bold tracking-wider text-slate-300 uppercase">{displayCardName}</p>
+                      </div>
+                      <div className="text-left">
+                        <p className="text-[8px] font-bold uppercase tracking-[0.15em] text-slate-500">Chain ID</p>
+                        <p className="text-xs font-mono font-bold text-slate-300">{walletState.balance?.chainId ?? '—'}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Secondary Card Peek Strip — Toggle Button */}
+                <div
+                  onClick={() => setActiveCardIndex((prev) => (prev === 0 ? 1 : 0))}
+                  className="w-11 h-44 rounded-2xl p-2 flex flex-col justify-between items-center cursor-pointer transition-all duration-200 hover:scale-[1.03] shadow-md border border-slate-200/80 dark:border-slate-700/80"
+                  style={{
+                    background: activeCardIndex === 0
+                      ? "linear-gradient(180deg, #1E293B 0%, #0F172A 100%)"
+                      : "linear-gradient(180deg, #84CC16 0%, #65A30D 100%)",
+                  }}
+                  title={activeCardIndex === 0 ? "Switch to Obsidian Credit Card" : "Switch to Lime Debit Card"}>
+                  <span className="text-[9px] font-extrabold uppercase text-white/90 [writing-mode:vertical-rl] rotate-180 tracking-widest pt-1">
+                    {activeCardIndex === 0 ? "Credit Card" : "Debit Card"}
+                  </span>
+                  <span className="text-[10px] text-white/80 font-bold">⇄</span>
                 </div>
               </div>
             </div>
 
             {/* Quick Actions */}
             <div className="grid grid-cols-5 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
-              <button onClick={() => onOpenGoalModal("Send 0.01 ETH to ")} className="flex flex-col items-center gap-1.5 group">
+              <button onClick={() => onNavigate("chat")} className="flex flex-col items-center gap-1.5 group">
                 <div className="w-11 h-11 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 group-hover:bg-[#84CC16] group-hover:text-white transition">
                   <Icon name="send" size={17} />
                 </div>
                 <span className="text-[11px] font-bold text-slate-600">Send</span>
               </button>
 
-              <button onClick={() => onOpenGoalModal("Swap 12 USDC to ETH")} className="flex flex-col items-center gap-1.5 group">
+              <button onClick={() => onNavigate("chat")} className="flex flex-col items-center gap-1.5 group">
                 <div className="w-11 h-11 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 group-hover:bg-[#84CC16] group-hover:text-white transition">
                   <Icon name="refresh" size={17} />
                 </div>
