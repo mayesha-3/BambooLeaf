@@ -43,6 +43,12 @@ const searchPages: { name: string; page: Page; keywords: string }[] = [
 
 type AccountIdentity = { walletAddress: string; role: string | null }
 type InjectedWallet = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> }
+type AppNotification = {
+  id: string
+  title: string
+  description: string
+  page: Page
+}
 
 function roleLabel(role: string | null): string {
   if (!role) return 'Unassigned'
@@ -51,6 +57,10 @@ function roleLabel(role: string | null): string {
 
 function profileKey(walletAddress: string): string {
   return `${profileStorageKey}:${walletAddress.toLowerCase()}`
+}
+
+function notificationReadKey(walletAddress: string): string {
+  return `bambooleaf_read_notifications:${walletAddress.toLowerCase()}`
 }
 
 function profileForAccount(walletAddress: string, role: string | null): UserProfile {
@@ -174,6 +184,12 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showSearchModal, setShowSearchModal] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>([])
+  const [notificationLoading, setNotificationLoading] = useState(false)
+  const [notificationError, setNotificationError] = useState('')
+  const notificationRequestId = useRef(0)
+  const notificationContainerRef = useRef<HTMLDivElement>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchSelection, setSearchSelection] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -181,6 +197,17 @@ export function App() {
   const [isResizingSidebar, setIsResizingSidebar] = useState(false)
   const sidebarResizing = useRef(false)
   const sidebarRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (!showNotifications) return
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !notificationContainerRef.current?.contains(event.target)) {
+        setShowNotifications(false)
+      }
+    }
+    document.addEventListener('pointerdown', handleOutsidePointerDown)
+    return () => document.removeEventListener('pointerdown', handleOutsidePointerDown)
+  }, [showNotifications])
 
   // Dark mode theme state
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -213,6 +240,106 @@ export function App() {
   const [accountMessage, setAccountMessage] = useState('')
   const [userProfile, setUserProfile] = useState<UserProfile>(guestProfile)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
+
+  const loadNotifications = useCallback(async () => {
+    const requestId = ++notificationRequestId.current
+    if (!account || (account.role !== 'admin' && account.role !== 'approver')) {
+      setNotifications([])
+      setNotificationLoading(false)
+      setNotificationError('')
+      return
+    }
+
+    if (notifications.length === 0) setNotificationLoading(true)
+    try {
+      const [approvalResponse, supplierResponse] = await Promise.all([
+        authenticatedFetch(`${apiBaseUrl}/approvals`),
+        account.role === 'approver'
+          ? authenticatedFetch(`${apiBaseUrl}/suppliers`)
+          : Promise.resolve(null),
+      ])
+      if (requestId !== notificationRequestId.current) return
+
+      const approvalPayload = await approvalResponse.json() as {
+        approvals?: Array<{
+          approvalId: string
+          intent: { action: string; from: { token: string; amount?: string }; to?: { token: string } }
+        }>
+        error?: string
+      }
+      if (!approvalResponse.ok) {
+        throw new Error(approvalPayload.error || `Could not load transaction approvals (${approvalResponse.status}).`)
+      }
+
+      const nextNotifications: AppNotification[] = (approvalPayload.approvals || []).map((approval) => ({
+        id: `transaction-${approval.approvalId}`,
+        title: approval.intent.action === 'swap' ? 'Swap approval requested' : 'Transfer approval requested',
+        description: approval.intent.action === 'swap'
+          ? `${approval.intent.from.amount ?? '—'} ${approval.intent.from.token} → ${approval.intent.to?.token ?? 'token'}`
+          : `${approval.intent.from.amount ?? '—'} ${approval.intent.from.token} transfer`,
+        page: 'approvals',
+      }))
+
+      if (supplierResponse) {
+        const supplierPayload = await supplierResponse.json() as {
+          suppliers?: Array<{
+            supplierId: string
+            name: string
+            status: string
+            pendingChange?: { name: string }
+          }>
+          error?: string
+        }
+        if (!supplierResponse.ok) {
+          throw new Error(supplierPayload.error || `Could not load supplier approvals (${supplierResponse.status}).`)
+        }
+        for (const supplier of supplierPayload.suppliers || []) {
+          if (supplier.status !== 'pending_approval' && !supplier.pendingChange) continue
+          const isChange = Boolean(supplier.pendingChange)
+          nextNotifications.push({
+            id: `supplier-${supplier.supplierId}-${isChange ? 'change' : 'approval'}`,
+            title: isChange ? 'Supplier change needs approval' : 'Supplier needs approval',
+            description: supplier.pendingChange
+              ? `${supplier.name} → ${supplier.pendingChange.name}`
+              : `${supplier.name} is waiting for verification`,
+            page: 'approvals',
+          })
+        }
+      }
+
+      if (requestId !== notificationRequestId.current) return
+      setNotifications(nextNotifications)
+      setNotificationError('')
+    } catch (error) {
+      if (requestId === notificationRequestId.current) {
+        setNotificationError(error instanceof Error ? error.message : 'Could not load notifications.')
+      }
+    } finally {
+      if (requestId === notificationRequestId.current) setNotificationLoading(false)
+    }
+  }, [account, notifications.length])
+
+  useEffect(() => {
+    if (!account?.walletAddress) {
+      setReadNotificationIds([])
+      return
+    }
+    try {
+      const saved = localStorage.getItem(notificationReadKey(account.walletAddress))
+      const parsed: unknown = saved ? JSON.parse(saved) : []
+      setReadNotificationIds(Array.isArray(parsed) && parsed.every((id) => typeof id === 'string') ? parsed : [])
+    } catch {
+      setReadNotificationIds([])
+      setNotificationError('Read notification status could not be loaded from browser storage.')
+    }
+  }, [account?.walletAddress])
+
+  useEffect(() => {
+    void loadNotifications()
+    if (!account || (account.role !== 'admin' && account.role !== 'approver')) return
+    const timer = window.setInterval(() => void loadNotifications(), 30_000)
+    return () => window.clearInterval(timer)
+  }, [account, loadNotifications])
 
   const refreshSession = useCallback(async () => {
     const token = getDeviceSessionToken()
@@ -425,6 +552,23 @@ export function App() {
   const selectSearchResult = (selectedPage: Page) => {
     navigate(selectedPage)
     closeSearch()
+  }
+
+  const unreadNotificationCount = notifications.reduce(
+    (count, notification) => count + (readNotificationIds.includes(notification.id) ? 0 : 1),
+    0,
+  )
+
+  const markNotificationsRead = (ids: string[]) => {
+    if (!account?.walletAddress) return
+    const nextReadIds = [...new Set([...readNotificationIds, ...ids])]
+    try {
+      localStorage.setItem(notificationReadKey(account.walletAddress), JSON.stringify(nextReadIds))
+      setReadNotificationIds(nextReadIds)
+      setNotificationError('')
+    } catch {
+      setNotificationError('Read notification status could not be saved in browser storage.')
+    }
   }
 
   useEffect(() => {
@@ -648,33 +792,92 @@ export function App() {
               Sepolia testnet
             </div>
 
-            {/* Notification Bell with Red Badge Dot */}
-            <div className="relative">
+            {/* Approval notifications */}
+            <div ref={notificationContainerRef} className="relative">
               <button
-                onClick={() => setShowNotifications((prev) => !prev)}
+                onClick={() => {
+                  const opening = !showNotifications
+                  setShowNotifications(opening)
+                  if (opening) void loadNotifications()
+                }}
                 className="w-10 h-10 rounded-full border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 transition shadow-sm relative"
                 aria-label="Notifications"
+                aria-expanded={showNotifications}
+                aria-controls="notification-panel"
               >
                 <Icon name="bell" size={17} />
-                <span className="w-2 h-2 rounded-full bg-rose-500 absolute top-2.5 right-2.5 ring-2 ring-white dark:ring-slate-900" />
+                {unreadNotificationCount > 0 && (
+                  <span className="absolute -right-1 -top-1 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] leading-4 font-bold ring-2 ring-white dark:ring-slate-900">
+                    {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+                  </span>
+                )}
               </button>
 
               {showNotifications && (
-                <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-100 dark:border-slate-800 shadow-xl z-50 text-xs space-y-3">
+                <div id="notification-panel" className="absolute right-0 mt-2 w-80 sm:w-96 max-h-[min(70vh,28rem)] overflow-y-auto bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-100 dark:border-slate-800 shadow-xl z-50 text-xs space-y-3" role="region" aria-label="Notifications">
                   <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
-                    <span className="font-bold text-slate-900 dark:text-white">Notifications</span>
-                    <span className="text-[10px] text-[#65A30D] dark:text-lime-400 font-bold cursor-pointer">Mark all read</span>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60">
-                      <p className="font-bold text-slate-800 dark:text-slate-200">T2 Swap Approval Pending</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">12 USDC → ETH awaiting your review</p>
+                    <div>
+                      <span className="font-bold text-slate-900 dark:text-white">Notifications</span>
+                      <span className="ml-2 text-[10px] text-slate-400">{notifications.length}</span>
                     </div>
-                    <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60">
-                      <p className="font-bold text-slate-800 dark:text-slate-200">Policy Passed</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Transfer of 0.008 ETH signed</p>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => markNotificationsRead(notifications.map((notification) => notification.id))}
+                      disabled={unreadNotificationCount === 0}
+                      className="text-[10px] text-[#65A30D] dark:text-lime-400 font-bold disabled:text-slate-400 disabled:cursor-default"
+                    >
+                      Mark all read
+                    </button>
                   </div>
+                  {notificationError && (
+                    <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300" role="alert">
+                      <p>{notificationError}</p>
+                      <button type="button" onClick={() => void loadNotifications()} className="mt-2 font-bold underline">Try again</button>
+                    </div>
+                  )}
+                  {notificationLoading && notifications.length === 0 && (
+                    <p className="py-4 text-center text-slate-500" role="status">Loading notifications…</p>
+                  )}
+                  {!account && !notificationLoading && (
+                    <p className="py-4 text-center text-slate-500">Sign in to receive approval notifications.</p>
+                  )}
+                  {account && account.role !== 'admin' && account.role !== 'approver' && !notificationLoading && (
+                    <p className="py-4 text-center text-slate-500">There are no approval notifications for this account.</p>
+                  )}
+                  {account && (account.role === 'admin' || account.role === 'approver') && !notificationLoading && notifications.length === 0 && !notificationError && (
+                    <p className="py-4 text-center text-slate-500">You’re all caught up. No pending approvals.</p>
+                  )}
+                  {notifications.length > 0 && (
+                    <div className="space-y-2">
+                      {notifications.map((notification) => {
+                        const isRead = readNotificationIds.includes(notification.id)
+                        return (
+                          <button
+                            key={notification.id}
+                            type="button"
+                            onClick={() => {
+                              markNotificationsRead([notification.id])
+                              setShowNotifications(false)
+                              navigate(notification.page)
+                            }}
+                            className={`w-full rounded-xl p-3 text-left transition ${
+                              isRead
+                                ? 'bg-slate-50 dark:bg-slate-800/40'
+                                : 'bg-lime-50 dark:bg-lime-950/30 ring-1 ring-lime-200 dark:ring-lime-900/60'
+                            }`}
+                          >
+                            <span className="flex items-start justify-between gap-3">
+                              <span>
+                                <span className="block font-bold text-slate-800 dark:text-slate-200">{notification.title}</span>
+                                <span className="mt-1 block text-[10px] text-slate-500 dark:text-slate-400">{notification.description}</span>
+                              </span>
+                              {!isRead && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-rose-500" aria-label="Unread" />}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
