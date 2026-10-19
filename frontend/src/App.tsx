@@ -12,6 +12,7 @@ import AutonomyPage from './pages/AutonomyPage'
 import WalletPage from './pages/WalletPage'
 import ArenaPage from './pages/ArenaPage'
 import SettingsPage from './pages/SettingsPage'
+import TransactPage from './pages/TransactPage'
 import ChatPage from './features/chat/ChatPage'
 import ProfileDropdown from './components/ProfileDropdown'
 import LiveMarketTicker from './features/market/LiveMarketTicker'
@@ -28,6 +29,7 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: IconNa
     label: 'WORKSPACE',
     items: [
       { id: 'overview', label: 'Overview', icon: 'grid' },
+      { id: 'transact', label: 'Transact', icon: 'send' },
       { id: 'activity', label: 'Activity log', icon: 'activity' },
       { id: 'approvals', label: 'Approvals', icon: 'check' },
     ],
@@ -46,7 +48,7 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: IconNa
   },
 ]
 
-const validPages: Page[] = ['overview', 'chat', 'activity', 'approvals', 'policy', 'autonomy', 'wallet', 'arena', 'settings']
+const validPages: Page[] = ['overview', 'chat', 'activity', 'approvals', 'policy', 'autonomy', 'wallet', 'arena', 'settings', 'transact']
 
 function getInitialPage(): Page {
   if (typeof window !== 'undefined') {
@@ -626,6 +628,7 @@ export function App() {
               {page === 'autonomy' && <AutonomyPage />}
               {page === 'wallet' && <WalletPage userProfile={userProfile} />}
               {page === 'arena' && <ArenaPage />}
+              {page === 'transact' && <TransactPage onNavigate={navigate} />}
               {page === 'settings' && (
                 <SettingsPage
                   userProfile={userProfile}
@@ -684,6 +687,7 @@ export function App() {
               {[
                 { name: '⚡ Agent Chat — Talk to BambooLeaf', p: 'chat' as Page, keywords: 'chat agent talk bamboo' },
                 { name: 'Overview & Guarded Balance', p: 'overview' as Page, keywords: 'overview dashboard balance home' },
+                { name: '💸 Transact — Manual Send & Swap', p: 'transact' as Page, keywords: 'transact send swap manual transfer' },
                 { name: 'Activity Log & Chain Hashes', p: 'activity' as Page, keywords: 'activity log audit chain hash history' },
                 { name: 'Pending Approvals Queue', p: 'approvals' as Page, keywords: 'approvals pending review queue' },
                 { name: 'Policy & Enforced Limits', p: 'policy' as Page, keywords: 'policy limits cap rules spending' },

@@ -494,14 +494,14 @@ export default function OverviewPage({
 
             {/* Quick Actions */}
             <div className="grid grid-cols-5 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
-              <button onClick={() => onNavigate("chat")} className="flex flex-col items-center gap-1.5 group">
+              <button onClick={() => onNavigate("transact")} className="flex flex-col items-center gap-1.5 group">
                 <div className="w-11 h-11 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 group-hover:bg-[#84CC16] group-hover:text-white transition">
                   <Icon name="send" size={17} />
                 </div>
                 <span className="text-[11px] font-bold text-slate-600">Send</span>
               </button>
 
-              <button onClick={() => onNavigate("chat")} className="flex flex-col items-center gap-1.5 group">
+              <button onClick={() => onNavigate("transact")} className="flex flex-col items-center gap-1.5 group">
                 <div className="w-11 h-11 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 group-hover:bg-[#84CC16] group-hover:text-white transition">
                   <Icon name="refresh" size={17} />
                 </div>
