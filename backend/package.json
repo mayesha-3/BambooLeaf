@@ -4,7 +4,8 @@
   "type": "module",
   "main": "src/server.tsx",
   "scripts": {
-    "dev": "tsx watch src/server.tsx",
+    "dev": "tsx scripts/dev.tsx",
+    "dev:api": "tsx watch src/server.tsx",
     "start": "tsx src/server.tsx",
     "anvil": "node node_modules/@foundry-rs/anvil/bin.mjs --host 127.0.0.1 --port 8545 --chain-id 31337",
     "anvil:fork": "tsx scripts/anvil-fork.tsx",

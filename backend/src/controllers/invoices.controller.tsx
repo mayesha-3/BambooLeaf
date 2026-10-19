@@ -142,7 +142,23 @@ async function submitInvoice(request, response, next) {
       type: 'invoice.guard_checks_passed',
       data: { invoiceId, supplierId: supplier.supplierId, invoiceNumber: invoice.invoiceNumber, amountEth },
     })
-    const result = await submitVerifiedSupplierPayment(database, invoiceId, requestId)
+    let result
+    try {
+      result = await submitVerifiedSupplierPayment(database, invoiceId, requestId)
+    } catch (paymentError) {
+      const reason = paymentError instanceof Error ? paymentError.message : 'Supplier payment processing failed.'
+      await database.collection(COLLECTIONS.invoices).updateOne(
+        { invoiceId, status: 'processing' },
+        { $set: { status: 'payment_failed', escalationReason: reason, updatedAt: new Date() } },
+      )
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'invoice.payment_failed',
+        data: { invoiceId, supplierId: supplier.supplierId, reason },
+      })
+      response.status(502).json({ invoiceId, status: 'payment_failed', reason })
+      return
+    }
     const body = result.body || {}
     const status = body.status === 'confirmed' ? 'paid'
       : body.status === 'approval_required' ? 'awaiting_approval'

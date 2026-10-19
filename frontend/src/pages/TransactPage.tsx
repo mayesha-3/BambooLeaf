@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import Card from '../components/ui/Card'
 import Icon from '../components/ui/Icon'
 import Badge from '../components/ui/Badge'
@@ -16,31 +16,30 @@ type TxStatus = 'idle' | 'signing' | 'pending' | 'success' | 'failed'
 
 type TxHistoryEntry = {
   id: string
+  requestId: string
   type: 'send' | 'swap'
-  from: string
   to: string
   amount: string
   asset: string
   toAsset?: string
   toAmount?: string
   status: 'success' | 'pending' | 'blocked'
+  state: string
+  error?: string
+  approvalId?: string
   timestamp: Date
   txHash?: string
 }
 
-const ASSETS = [
-  { symbol: 'ETH', name: 'Ethereum' },
-  { symbol: 'USDC', name: 'USD Coin' },
-  { symbol: 'BTC', name: 'Bitcoin' },
-  { symbol: 'SOL', name: 'Solana' },
-  { symbol: 'UNI', name: 'Uniswap' },
-]
-
-const GAS_SPEEDS = [
-  { label: 'Slow', gwei: '12', time: '~5 min', color: 'text-slate-500' },
-  { label: 'Standard', gwei: '18', time: '~1 min', color: 'text-amber-500' },
-  { label: 'Fast', gwei: '28', time: '~15 sec', color: 'text-lime-600' },
-]
+type PolicySummary = {
+  maxPerTxEth: string
+  maxPerRecipientPerDayEth: string
+  maxSwapInputAmount: string | null
+  maxTxPerWindow: number
+  velocityWindowSeconds: number
+  allowedRecipients: string[]
+  supportedAssets: { symbol: string; name?: string }[]
+}
 
 const SLIPPAGE_OPTIONS = ['0.1%', '0.5%', '1.0%', 'Custom']
 
@@ -110,8 +109,7 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
   // Send state
   const [sendTo, setSendTo] = useState('')
   const [sendAmount, setSendAmount] = useState('')
-  const [sendAsset, setSendAsset] = useState('ETH')
-  const [gasSpeed, setGasSpeed] = useState(1)
+  const sendAsset = 'ETH'
 
   // Swap state
   const [swapFrom, setSwapFrom] = useState('USDC')
@@ -125,10 +123,74 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
   const [showConfirm, setShowConfirm] = useState(false)
   const [txStatus, setTxStatus] = useState<TxStatus>('idle')
   const [txHash, setTxHash] = useState('')
+  const [approvalId, setApprovalId] = useState('')
 
-  // History (local demo)
+  // Transaction records and policy are loaded from the backend's MongoDB-backed APIs.
   const [history, setHistory] = useState<TxHistoryEntry[]>([])
+  const [historySummary, setHistorySummary] = useState({ completed: 0, blocked: 0, pending: 0, counted: 0 })
+  const [historyError, setHistoryError] = useState('')
+  const [policySummary, setPolicySummary] = useState<PolicySummary | null>(null)
+  const [policyError, setPolicyError] = useState('')
   const [submissionMessage, setSubmissionMessage] = useState('')
+  const [requestId, setRequestId] = useState('')
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const response = await authenticatedFetch(`${apiBaseUrl}/goal/history`)
+      const payload = await response.json() as {
+        transactions?: Array<Omit<TxHistoryEntry, 'timestamp'> & { timestamp: string }>
+        summary?: typeof historySummary
+        error?: string
+      }
+      if (!response.ok) throw new Error(payload.error || `Transaction history failed (${response.status})`)
+      setHistory((payload.transactions || []).map((entry) => ({ ...entry, timestamp: new Date(entry.timestamp) })))
+      setHistorySummary(payload.summary || { completed: 0, blocked: 0, pending: 0, counted: 0 })
+      setHistoryError('')
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : 'Unable to load saved transaction history.')
+    }
+  }, [])
+
+  const loadPolicySummary = useCallback(async () => {
+    try {
+      const response = await authenticatedFetch(`${apiBaseUrl}/policy`)
+      const payload = await response.json() as PolicySummary & { error?: string }
+      if (!response.ok) throw new Error(payload.error || `Policy request failed (${response.status})`)
+      setPolicySummary(payload)
+      setPolicyError('')
+    } catch (error) {
+      setPolicyError(error instanceof Error ? error.message : 'Unable to load active policy.')
+    }
+  }, [])
+
+  const supportedSwapAssets = useMemo(() =>
+    (policySummary?.supportedAssets || []).filter((asset) =>
+      asset.symbol !== 'WETH' || !policySummary?.supportedAssets.some((supported) => supported.symbol === 'ETH')),
+  [policySummary?.supportedAssets])
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => {
+      void loadHistory()
+      void loadPolicySummary()
+    }, 0)
+    const timer = window.setInterval(() => void loadHistory(), 8000)
+    return () => {
+      window.clearTimeout(initialLoad)
+      window.clearInterval(timer)
+    }
+  }, [loadHistory, loadPolicySummary])
+
+  useEffect(() => {
+    const symbols = supportedSwapAssets.map((asset) => asset.symbol)
+    if (!symbols.length) return
+    const syncAssets = window.setTimeout(() => {
+      if (!symbols.includes(swapFrom)) setSwapFrom(symbols[0])
+      if (!symbols.includes(swapTo) || swapTo === swapFrom) {
+        setSwapTo(symbols.find((symbol) => symbol !== swapFrom) || '')
+      }
+    }, 0)
+    return () => window.clearTimeout(syncAssets)
+  }, [supportedSwapAssets, swapFrom, swapTo])
 
   // ─── Computed values ──────────────────────────────────────────────────────
 
@@ -146,9 +208,6 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
   const swapUsdValue = swapAmountNum
     ? (swapAmountNum * (prices[swapFrom]?.price ?? 1)).toFixed(2)
     : null
-
-  const gasEth = (parseInt(GAS_SPEEDS[gasSpeed].gwei) * 21000) / 1e9
-  const gasUsd = (gasEth * ethPrice).toFixed(4)
 
   const effectiveSlippage = slippage === 'Custom' ? customSlippage : slippage
 
@@ -199,45 +258,48 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({ goal }),
       })
-      const result = await response.json() as {
+      const result = await response.json().catch(() => null) as {
         status?: string
         txHash?: string
         requestId?: string
+        approvalId?: string
+        expiresAt?: number
         error?: string
         reason?: string
         approval?: { id?: string }
       }
+      if (!result) throw new Error(`Backend returned an unreadable response (${response.status}).`)
+      setRequestId(result.requestId || '')
       if (!response.ok) throw new Error(result.error || `Transaction request failed (${response.status})`)
       setTxHash(result.txHash || '')
       setSubmissionMessage(result.reason || result.error || '')
       if (result.status === 'success' || result.status === 'confirmed') {
-        setTxStatus('success')
+        if (!result.txHash) {
+          setTxStatus('failed')
+          setSubmissionMessage('The backend reported success without a transaction hash. Verify Activity Log before retrying.')
+        } else {
+          setTxStatus('success')
+        }
       } else if (result.status === 'approval_required') {
-        setPolicyStatus('approval')
-        setTxStatus('pending')
+        const id = result.approval?.id || result.approvalId
+        if (!id) {
+          setTxStatus('failed')
+          setSubmissionMessage('Approval was required but no Approval Queue record ID was returned. Nothing was executed.')
+        } else {
+          setApprovalId(id)
+          setPolicyStatus('approval')
+          setTxStatus('pending')
+          setSubmissionMessage(`Awaiting authorized review in the Approval Queue. Request ${id}`)
+        }
       } else {
         setTxStatus('failed')
         if (!result.reason && !result.error) setSubmissionMessage(`Request was not executed (${result.status || 'unknown status'}).`)
       }
-
-      if (result.status === 'success' || result.status === 'confirmed' || result.status === 'approval_required') {
-        const entry: TxHistoryEntry = {
-          id: result.requestId || crypto.randomUUID(),
-          type: tab,
-          from: '',
-          to: tab === 'send' ? sendTo : '',
-          amount: tab === 'send' ? sendAmount : swapAmount,
-          asset: tab === 'send' ? sendAsset : swapFrom,
-          ...(tab === 'swap' && { toAsset: swapTo, toAmount: receivedAmount.toFixed(6) }),
-          status: result.status === 'approval_required' ? 'pending' : 'success',
-          timestamp: new Date(),
-          ...(result.txHash ? { txHash: result.txHash } : {}),
-        }
-        setHistory((prev) => [entry, ...prev])
-      }
+      await loadHistory()
     } catch (error) {
       setSubmissionMessage(error instanceof Error ? error.message : 'Unable to submit this transaction request.')
       setTxStatus('failed')
+      await loadHistory()
     }
   }
 
@@ -245,6 +307,8 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
     setShowConfirm(false)
     setTxStatus('idle')
     setTxHash('')
+    setApprovalId('')
+    setRequestId('')
     setSubmissionMessage('')
     setPolicyStatus('idle')
     setSendTo('')
@@ -255,12 +319,17 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
   const canPreview =
     tab === 'send'
       ? isValidAddress(sendTo) && parseFloat(sendAmount) > 0 && ['allowed', 'approval', 'unsupported'].includes(policyStatus)
-      : parseFloat(swapAmount) > 0 && swapFrom !== swapTo && ['allowed', 'approval', 'unsupported'].includes(policyStatus)
+      : parseFloat(swapAmount) > 0 && swapFrom !== swapTo &&
+        supportedSwapAssets.some((asset) => asset.symbol === swapFrom) &&
+        supportedSwapAssets.some((asset) => asset.symbol === swapTo) &&
+        ['allowed', 'approval', 'unsupported'].includes(policyStatus)
 
   const canCheck =
     tab === 'send'
       ? isValidAddress(sendTo) && parseFloat(sendAmount) > 0
-      : parseFloat(swapAmount) > 0 && swapFrom !== swapTo
+      : parseFloat(swapAmount) > 0 && swapFrom !== swapTo &&
+        supportedSwapAssets.some((asset) => asset.symbol === swapFrom) &&
+        supportedSwapAssets.some((asset) => asset.symbol === swapTo)
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -384,47 +453,12 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
                       >
                         MAX
                       </button>
-                      <select
-                        value={sendAsset}
-                        onChange={(e) => { setSendAsset(e.target.value); setPolicyStatus('idle') }}
-                        aria-label="Send asset"
-                        className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-900 dark:text-white rounded-xl px-3 py-1.5 outline-none cursor-pointer"
-                      >
-                        {ASSETS.map((a) => (
-                          <option key={a.symbol} value={a.symbol}>{a.symbol}</option>
-                        ))}
-                      </select>
+                      <span className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-bold dark:border-slate-700 dark:bg-slate-800">ETH</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Gas speed */}
-                <div className="space-y-2">
-                  <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Network Fee</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {GAS_SPEEDS.map((g, i) => (
-                      <button
-                        key={g.label}
-                        onClick={() => setGasSpeed(i)}
-                        className={`flex flex-col items-center gap-1 p-3 rounded-2xl border-2 transition-all duration-200 ${
-                          gasSpeed === i
-                            ? 'border-[#84CC16] bg-lime-50 dark:bg-lime-950/30'
-                            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 hover:border-slate-300 dark:hover:border-slate-600'
-                        }`}
-                      >
-                        <span className={`text-xs font-extrabold ${gasSpeed === i ? 'text-[#65A30D] dark:text-lime-400' : 'text-slate-600 dark:text-slate-300'}`}>
-                          {g.label}
-                        </span>
-                        <span className={`text-[10px] font-mono font-bold ${g.color}`}>{g.gwei} Gwei</span>
-                        <span className="text-[10px] text-slate-400">{g.time}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] px-1">
-                    <span className="text-slate-400 font-medium">Est. gas cost</span>
-                    <span className="font-bold font-mono text-slate-700 dark:text-slate-300">{gasEth.toFixed(6)} ETH <span className="text-slate-400">(${gasUsd})</span></span>
-                  </div>
-                </div>
+                <p className="text-[11px] text-slate-400">Exact network fee is determined by the signer when the transaction is submitted.</p>
               </>
             ) : (
               <>
@@ -448,7 +482,7 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
                       aria-label="Swap from asset"
                       className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-900 dark:text-white rounded-xl px-3 py-1.5 outline-none cursor-pointer"
                     >
-                      {ASSETS.map((a) => <option key={a.symbol} value={a.symbol}>{a.symbol}</option>)}
+                      {supportedSwapAssets.map((a) => <option key={a.symbol} value={a.symbol}>{a.symbol}</option>)}
                     </select>
                   </div>
                 </div>
@@ -469,13 +503,14 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
                 {/* Swap to */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">You Receive (Est.)</label>
+                      <label className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Market estimate only</label>
                     {swapFrom !== swapTo && (
                       <span className="text-[11px] text-slate-400 font-mono">
                         1 {swapFrom} = {convert(1, swapFrom, swapTo).toFixed(5)} {swapTo}
                       </span>
                     )}
                   </div>
+                  <p className="text-[10px] text-slate-400">The backend obtains the router quote and enforces minimum output when submitted; this market estimate is not a guaranteed quote.</p>
                   <div className="flex items-center gap-3 rounded-2xl border-2 border-slate-100 dark:border-slate-800 p-4 bg-slate-50/30 dark:bg-slate-800/20">
                     <div className="w-8 h-8 flex items-center justify-center shrink-0">{getCryptoIcon(swapTo, 28)}</div>
                     <div className="flex-1 text-2xl font-extrabold font-mono text-slate-900 dark:text-white tabular-nums">
@@ -490,7 +525,7 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
                       aria-label="Swap to asset"
                       className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-bold text-slate-900 dark:text-white rounded-xl px-3 py-1.5 outline-none cursor-pointer"
                     >
-                      {ASSETS.map((a) => <option key={a.symbol} value={a.symbol}>{a.symbol}</option>)}
+                      {supportedSwapAssets.map((a) => <option key={a.symbol} value={a.symbol}>{a.symbol}</option>)}
                     </select>
                   </div>
                   {swapFrom === swapTo && (
@@ -531,11 +566,11 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
                 <div className="grid grid-cols-2 gap-3 text-[11px]">
                   <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
                     <span className="text-slate-400 font-medium">Route</span>
-                    <span className="font-bold text-slate-700 dark:text-slate-300">Via Uniswap V3</span>
+                    <span className="font-bold text-slate-700 dark:text-slate-300">Via configured swap router</span>
                   </div>
                   <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
-                    <span className="text-slate-400 font-medium">Network Fee</span>
-                    <span className="font-bold font-mono text-slate-700 dark:text-slate-300">~${gasUsd}</span>
+                    <span className="text-slate-400 font-medium">Fee</span>
+                    <span className="font-bold text-slate-700 dark:text-slate-300">Set by network at submission</span>
                   </div>
                 </div>
               </>
@@ -582,20 +617,22 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
           {/* Quick stats */}
           <div className="grid grid-cols-2 gap-3">
             <Card className="p-4 space-y-1">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Total Sent</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Confirmed</p>
               <p className="text-xl font-extrabold text-slate-900 dark:text-white">
-                {history.filter(h => h.status === 'success').length}
+                {historySummary.completed}
               </p>
-              <p className="text-[10px] text-slate-400">transactions</p>
+              <p className="text-[10px] text-slate-400">saved transactions</p>
             </Card>
             <Card className="p-4 space-y-1">
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Blocked</p>
               <p className="text-xl font-extrabold text-rose-500">
-                {history.filter(h => h.status === 'blocked').length}
+                {historySummary.blocked}
               </p>
-              <p className="text-[10px] text-slate-400">by guardrails</p>
+              <p className="text-[10px] text-slate-400">saved requests</p>
             </Card>
           </div>
+
+          {historyError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{historyError} Summary and recent transactions are unavailable.</p>}
 
           {/* Transaction history */}
           <Card className="p-5 space-y-4">
@@ -611,7 +648,7 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
 
             <div className="space-y-2">
               {history.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-8">No manual transactions yet</p>
+                <p className="text-xs text-slate-400 text-center py-8">{historyError ? 'Unable to load saved transactions.' : 'No saved transactions yet.'}</p>
               ) : (
                 history.map((h) => (
                   <div key={h.id} className="group flex items-center gap-3 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
@@ -632,9 +669,11 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
                         </p>
                       </div>
                       <p className="text-[10px] text-slate-400 font-mono truncate">
-                        {h.type === 'send' ? `To: ${shortenAddress(h.to)}` : `Get: ${h.toAmount} ${h.toAsset}`}
+                        {h.type === 'send' ? `To: ${shortenAddress(h.to)}` : h.toAmount ? `Minimum receive: ${h.toAmount} ${h.toAsset}` : `To: ${h.toAsset}`}
                       </p>
-                      <p className="text-[9px] text-slate-400 mt-0.5">{h.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                      {h.error && <p className="text-[10px] text-rose-600 dark:text-rose-400 truncate">{h.error}</p>}
+                      {h.txHash && <p className="text-[9px] text-slate-400 font-mono truncate">{h.txHash}</p>}
+                      <p className="text-[9px] text-slate-400 mt-0.5">{h.timestamp.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })} · {h.state}</p>
                     </div>
 
                     {/* Status */}
@@ -657,27 +696,24 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
               </div>
               <div>
                 <p className="text-sm font-bold text-slate-900 dark:text-white">Active Policy Rules</p>
-                <p className="text-[10px] text-slate-400">Manual tx guardrails</p>
+                <p className="text-[10px] text-slate-400">Loaded from active backend policy</p>
               </div>
             </div>
-            <div className="space-y-2 text-[11px]">
+            {policyError && <p role="alert" className="text-xs text-rose-600">{policyError}</p>}
+            {policySummary ? <div className="space-y-2 text-[11px]">
               {[
-                { label: 'Per-tx ETH cap', value: '1.0 ETH', ok: true },
-                { label: 'T2 approval > ', value: '0.05 ETH', ok: true },
-                { label: 'Swap cap', value: '$500 USDC', ok: true },
-                { label: 'Blocked addresses', value: 'OFAC list', ok: false },
+                { label: 'Per-transaction ETH cap', value: `${policySummary.maxPerTxEth} ETH` },
+                { label: 'Daily recipient limit', value: `${policySummary.maxPerRecipientPerDayEth} ETH` },
+                { label: 'Transaction velocity', value: `${policySummary.maxTxPerWindow} / ${policySummary.velocityWindowSeconds}s` },
+                { label: 'Maximum swap input', value: policySummary.maxSwapInputAmount || 'Not configured' },
+                { label: 'Allow-listed recipients', value: String(policySummary.allowedRecipients.length) },
               ].map((r) => (
                 <div key={r.label} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
                   <span className="text-slate-500 dark:text-slate-400 font-medium">{r.label}</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-bold font-mono text-slate-700 dark:text-slate-300">{r.value}</span>
-                    <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center ${r.ok ? 'bg-lime-500' : 'bg-rose-500'}`}>
-                      <Icon name={r.ok ? 'check' : 'x'} size={8} className="text-white" />
-                    </span>
-                  </div>
+                  <span className="font-bold font-mono text-slate-700 dark:text-slate-300">{r.value}</span>
                 </div>
               ))}
-            </div>
+            </div> : !policyError && <p className="text-xs text-slate-400">Loading saved policy…</p>}
             <button
               onClick={() => onNavigate('policy')}
               className="w-full text-center text-xs font-bold text-[#65A30D] dark:text-lime-400 hover:underline pt-1"
@@ -751,7 +787,7 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
                     )}
                     <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
                       <span className="text-slate-400 font-medium">Network fee</span>
-                      <span className="font-bold font-mono text-slate-800 dark:text-slate-200">{gasEth.toFixed(6)} ETH (${gasUsd})</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">Calculated at submission</span>
                     </div>
                     <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
                       <span className="text-slate-400 font-medium">Policy status</span>
@@ -784,7 +820,7 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
               </>
             )}
 
-            {(txStatus === 'signing' || txStatus === 'pending') && (
+            {txStatus === 'signing' && (
               <div className="px-6 py-14 flex flex-col items-center gap-5">
                 <div className="relative w-16 h-16">
                   <div className="absolute inset-0 rounded-full border-4 border-slate-100 dark:border-slate-800" />
@@ -794,12 +830,26 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
                   </div>
                 </div>
                 <div className="text-center">
-                  <p className="text-base font-bold text-slate-900 dark:text-white">
-                    {txStatus === 'signing'
-                      ? 'Submitting guarded request…'
-                      : policyStatus === 'approval' ? 'Waiting for owner approval…' : 'Broadcasting to network…'}
-                  </p>
+                  <p className="text-base font-bold text-slate-900 dark:text-white">Submitting guarded request…</p>
                   <p className="text-xs text-slate-400 mt-1">Please wait, do not close this window</p>
+                </div>
+              </div>
+            )}
+
+            {txStatus === 'pending' && (
+              <div className="px-6 py-10 flex flex-col items-center gap-5">
+                <div className="w-16 h-16 rounded-full bg-amber-400 flex items-center justify-center">
+                  <Icon name="clock" size={28} className="text-white" />
+                </div>
+                <div className="text-center space-y-2">
+                  <p className="text-lg font-extrabold text-slate-900 dark:text-white">Awaiting authorized approval</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-400">Queued only; no transaction has executed yet. An admin or approver must decide in the Approval Queue.</p>
+                  {approvalId && <p className="break-all font-mono text-[10px] text-slate-500">Approval ID: {approvalId}</p>}
+                  {requestId && <p className="break-all font-mono text-[10px] text-slate-500">Request ID: {requestId}</p>}
+                </div>
+                <div className="flex gap-3 w-full">
+                  <button onClick={() => onNavigate('approvals')} className="flex-1 rounded-2xl bg-amber-500 py-2.5 text-xs font-bold text-white">Open Approval Queue</button>
+                  <button onClick={handleReset} className="flex-1 rounded-2xl border-2 border-slate-200 py-2.5 text-xs font-bold text-slate-600 dark:border-slate-700 dark:text-slate-300">Close</button>
                 </div>
               </div>
             )}
@@ -810,10 +860,8 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
                   <Icon name="checkCircle" size={30} className="text-white" />
                 </div>
                 <div className="text-center space-y-1">
-                  <p className="text-lg font-extrabold text-slate-900 dark:text-white">{policyStatus === 'approval' ? 'Approval Required' : 'Transaction Submitted!'}</p>
-                  {policyStatus === 'approval' && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold">Queued for owner review{submissionMessage ? ` · ${submissionMessage}` : ''}</p>
-                  )}
+                  <p className="text-lg font-extrabold text-slate-900 dark:text-white">Transaction confirmed on-chain</p>
+                  {submissionMessage && <p className="text-xs text-slate-500">{submissionMessage}</p>}
                   {txHash && <>
                     <p className="text-xs text-slate-400">Tx Hash:</p>
                     <p className="text-[10px] font-mono text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg break-all">{txHash}</p>
@@ -842,8 +890,9 @@ export default function TransactPage({ onNavigate }: { onNavigate: (page: Page) 
                   <Icon name="x" size={28} className="text-white" />
                 </div>
                 <div className="text-center space-y-1">
-                  <p className="text-lg font-extrabold text-slate-900 dark:text-white">Transaction Blocked</p>
-                  <p className="text-xs text-slate-400">{submissionMessage || 'This request was not executed. Check your device session and backend status.'}</p>
+                  <p className="text-lg font-extrabold text-slate-900 dark:text-white">Transaction not confirmed</p>
+                  <p className="text-xs text-slate-400">{submissionMessage || 'The backend did not confirm execution. Check the Activity Log and on-chain status before retrying.'}</p>
+                  {requestId && <p className="break-all font-mono text-[10px] text-slate-500">Request ID: {requestId}</p>}
                 </div>
                 <div className="flex gap-3 w-full">
                   <button onClick={() => onNavigate('policy')} className="flex-1 py-2.5 rounded-2xl border-2 border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition">

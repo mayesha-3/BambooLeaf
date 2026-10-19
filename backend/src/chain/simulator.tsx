@@ -150,8 +150,15 @@ export async function simulateShadowFork(
       await rpc(provider, 'hardhat_setBalance', [from, '0x56BC75E2D63100000'])
     }
     const before = await readTokenBalances(provider, accounts, tokenAddresses)
+    const nativeBefore = Object.fromEntries(
+      await Promise.all(accounts.map(async (account) => [
+        account.toLowerCase(),
+        await provider.getBalance(account),
+      ])),
+    ) as Record<string, bigint>
     const receipts = []
     const calledAddresses = new Set<string>()
+    let gasFeesPaid = 0n
     for (const transaction of transactions) {
       const txHash = await rpc(provider, 'eth_sendTransaction', [{
         from,
@@ -161,13 +168,22 @@ export async function simulateShadowFork(
       }])
       const receipt = await provider.waitForTransaction(txHash)
       if (!receipt || receipt.status !== 1) throw new Error(`Fork transaction ${txHash} failed`)
-            receipts.push(receipt)
+      receipts.push(receipt)
+      gasFeesPaid += receipt.gasUsed * receipt.gasPrice
       const trace = await rpc(provider, 'debug_traceTransaction', [txHash, { tracer: 'callTracer' }])
       for (const address of traceAddresses(trace)) {
         calledAddresses.add(address)
       }
     }
     const after = await readTokenBalances(provider, accounts, tokenAddresses)
+    const nativeAfter = await Promise.all(accounts.map(async (account) => [
+      account.toLowerCase(),
+      await provider.getBalance(account),
+    ])) as Array<[string, bigint]>
+    const nativeBalanceDeltas = Object.fromEntries(nativeAfter.map(([account, balance]) => [
+      account,
+      balance - nativeBefore[account] + (account === from.toLowerCase() ? gasFeesPaid : 0n),
+    ]))
     const balanceDeltas = Object.fromEntries(
       Object.keys(before).map((key) => [key, after[key] - before[key]]),
     )
@@ -177,6 +193,7 @@ export async function simulateShadowFork(
       balanceBefore: before,
       balanceAfter: after,
       balanceDeltas,
+      nativeBalanceDeltas,
       events,
       calledAddresses: [...calledAddresses],
       transactions: receipts.map((receipt) => receipt.hash),
@@ -187,6 +204,7 @@ export async function simulateShadowFork(
       balanceBefore: {},
       balanceAfter: {},
       balanceDeltas: {},
+      nativeBalanceDeltas: {},
       events: [],
       calledAddresses: [],
       transactions: [],

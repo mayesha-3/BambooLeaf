@@ -52,7 +52,10 @@ test('signer re-verification applies the current autonomy tier to swaps', () => 
     amountIn: 100_000_000_000_000_000n,
   }
   assert.throws(() => assertSwapAutoExecutable(intent, swap, policy), /requires T2/)
+  assert.doesNotThrow(() => assertSwapAutoExecutable(intent, swap, policy, true))
   for (let i = 0; i < 10; i++) recordCleanExecution()
   assert.doesNotThrow(() => assertSwapAutoExecutable(intent, swap, policy))
+  activateKillSwitch()
+  assert.throws(() => assertSwapAutoExecutable(intent, swap, policy, true), /requires T3/)
   reset()
 })

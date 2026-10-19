@@ -8,6 +8,8 @@ async function ensureIndexes(database) {
     database.collection(COLLECTIONS.policyVersions).createIndex({ createdAt: -1 }),
     database.collection(COLLECTIONS.goals).createIndex({ idempotencyKey: 1 }, { unique: true }),
     database.collection(COLLECTIONS.goals).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    database.collection(COLLECTIONS.goals).createIndex({ 'body.intent.action': 1, createdAt: -1 }),
+    database.collection(COLLECTIONS.goals).createIndex({ requestedBy: 1, 'body.intent.action': 1, createdAt: -1 }),
     database.collection(COLLECTIONS.approvals).createIndex({ approvalId: 1 }, { unique: true }),
     database.collection(COLLECTIONS.approvals).createIndex({ status: 1, expiresAt: 1 }),
     database.collection(COLLECTIONS.policyUsage).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
