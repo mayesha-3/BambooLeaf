@@ -3,7 +3,6 @@ import type { Page, AuditEntry, AuditState, UserProfile } from './types'
 import type { IconName } from './types'
 import { apiBaseUrl } from './config/api'
 import Icon from './components/ui/Icon'
-import GoalComposer from './components/GoalComposer'
 import OverviewPage from './pages/OverviewPage'
 import ActivityPage from './pages/ActivityPage'
 import ApprovalsPage from './pages/ApprovalsPage'
@@ -27,6 +26,20 @@ import {
 
 const validPages: Page[] = ['overview', 'chat', 'activity', 'approvals', 'policy', 'autonomy', 'wallet', 'arena', 'compliance', 'payments', 'settings', 'transact']
 const profileStorageKey = 'bambooleaf_user_profile'
+const searchPages: { name: string; page: Page; keywords: string }[] = [
+  { name: 'Agent Chat', page: 'chat', keywords: 'agent talk bamboo copilot' },
+  { name: 'Overview & Guarded Balance', page: 'overview', keywords: 'dashboard home balance' },
+  { name: 'Transact — Send & Swap', page: 'transact', keywords: 'send swap manual transfer' },
+  { name: 'Activity Log', page: 'activity', keywords: 'audit chain hash history events' },
+  { name: 'Approvals', page: 'approvals', keywords: 'pending review queue authorize' },
+  { name: 'Policy & Limits', page: 'policy', keywords: 'cap rules spending recipients' },
+  { name: 'Autonomy', page: 'autonomy', keywords: 'permission level trust' },
+  { name: 'Wallet', page: 'wallet', keywords: 'eth usdc sepolia testnet crypto' },
+  { name: 'Attack Arena', page: 'arena', keywords: 'sandbox test security' },
+  { name: 'Compliance Console', page: 'compliance', keywords: 'auditor export verify' },
+  { name: 'Supplier Payments', page: 'payments', keywords: 'supplier invoice purchase order vendor' },
+  { name: 'Settings', page: 'settings', keywords: 'config security preferences profile' },
+]
 
 type AccountIdentity = { walletAddress: string; role: string | null }
 type InjectedWallet = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> }
@@ -159,10 +172,11 @@ export function App() {
   }, [])
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [showGoalModal, setShowGoalModal] = useState(false)
   const [showSearchModal, setShowSearchModal] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchSelection, setSearchSelection] = useState(0)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [sidebarWidth, setSidebarWidth] = useState(240)
   const [isResizingSidebar, setIsResizingSidebar] = useState(false)
   const sidebarResizing = useRef(false)
@@ -395,6 +409,28 @@ export function App() {
     setMobileNavOpen(false)
   }
 
+  const filteredSearchPages = searchPages.filter((item) => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return true
+    const searchable = `${item.name} ${item.keywords}`.toLowerCase()
+    return query.split(/\s+/).every((term) => searchable.includes(term))
+  })
+
+  const closeSearch = () => {
+    setShowSearchModal(false)
+    setSearchQuery('')
+    setSearchSelection(0)
+  }
+
+  const selectSearchResult = (selectedPage: Page) => {
+    navigate(selectedPage)
+    closeSearch()
+  }
+
+  useEffect(() => {
+    if (showSearchModal) searchInputRef.current?.focus()
+  }, [showSearchModal])
+
   return (
     <div className="h-screen w-screen bg-[#FBFBFC] dark:bg-[#080d19] text-slate-900 dark:text-slate-100 flex overflow-hidden antialiased selection:bg-[#84CC16] selection:text-white transition-colors duration-200">
 
@@ -546,29 +582,6 @@ export function App() {
           ))}
         </div>
 
-        {/* Bottom Card: Guarded Agent Status (Shakuro Pro Card style) */}
-        {!sidebarCollapsed && (
-          <div className="p-3.5 border-t border-slate-100/80 dark:border-slate-800/60">
-            {/* <div className="rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100/80 dark:from-slate-800/60 dark:to-slate-900/80 p-3.5 text-center border border-slate-200/70 dark:border-slate-700/60 shadow-sm backdrop-blur-sm space-y-2.5">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-slate-900 to-slate-700 dark:from-lime-400 dark:to-lime-500 text-white dark:text-slate-950 flex items-center justify-center mx-auto shadow-sm">
-                <Icon name="bolt" size={15} />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-slate-900 dark:text-white font-display">Guarded Agent Active</h4>
-                <p className="text-[11px] text-slate-400 dark:text-slate-400 mt-0.5 leading-relaxed">
-                  Deterministic policy firewall on Sepolia testnet.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowGoalModal(true)}
-                className="w-full bg-slate-950 hover:bg-black dark:bg-lime-400 dark:hover:bg-lime-300 dark:text-slate-950 text-white rounded-xl py-2 text-xs font-bold transition shadow-sm font-display tracking-tight"
-              >
-                + Plan agent goal
-              </button>
-            </div> */}
-          </div>
-        )}
-
         {/* Collapse sidebar button */}
         <div className="px-3.5 pb-3.5 pt-1">
           <button
@@ -614,16 +627,17 @@ export function App() {
               <Icon name="menu" size={20} />
             </button>
 
-            <div
-              onClick={() => setShowSearchModal(true)}
-              className="flex items-center gap-2.5 w-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-full px-4 py-2 text-xs text-slate-400 cursor-pointer shadow-sm transition"
+            <button
+              type="button"
+              onClick={() => { setSearchQuery(''); setSearchSelection(0); setShowSearchModal(true) }}
+              className="flex items-center gap-2.5 w-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-full px-4 py-2 text-xs text-slate-400 cursor-pointer shadow-sm transition text-left"
             >
               <Icon name="search" size={15} className="text-slate-400" />
               <span className="flex-1">Quick search</span>
               <span className="hidden sm:inline bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-mono text-[10px] px-1.5 py-0.5 rounded-md">
                 ⌘ K
               </span>
-            </div>
+            </button>
           </div>
 
           {/* Right: Actions, Notifications, Profile, Network */}
@@ -728,15 +742,6 @@ export function App() {
               </div>
             )}
 
-            {/* + Plan goal Button */}
-            <button
-              onClick={() => setShowGoalModal(true)}
-              className="inline-flex items-center gap-1.5 border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-bold px-4 py-2 rounded-full transition shadow-sm"
-            >
-              <Icon name="plus" size={14} />
-              <span className="hidden sm:inline">Plan goal</span>
-            </button>
-
           </div>
 
         </header>
@@ -782,94 +787,52 @@ export function App() {
 
       {/* ================= GLOBAL MODALS ================= */}
 
-      {/* 1. Ask BambooLeaf Agent Goal Modal */}
-      {showGoalModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full border border-slate-100 dark:border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
-            <div className="flex justify-between items-center px-6 pt-6 pb-2">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">Ask BambooLeaf Copilot</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Describe your goal. Deterministic policy guardrails validate every step.</p>
-              </div>
-              <button onClick={() => setShowGoalModal(false)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">✕</button>
-            </div>
-            <GoalComposer
-              onSubmitted={() => {
-                setTimeout(() => setShowGoalModal(false), 2000)
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* 2. Global Quick Search Modal (⌘ K) */}
+      {/* Global Quick Search Modal (⌘ K) */}
       {showSearchModal && (
         <div
           className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-start justify-center pt-20 p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) { setShowSearchModal(false); setSearchQuery('') } }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeSearch() }}
         >
           <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full border border-slate-100 dark:border-slate-800 shadow-2xl p-5 space-y-4 animate-in fade-in zoom-in-95">
             <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
               <Icon name="search" size={17} className="text-slate-400" />
               <input
-                autoFocus
+                ref={searchInputRef}
                 placeholder="Search workspace, policies, approvals, audit logs..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Escape') { setShowSearchModal(false); setSearchQuery('') } }}
+                onChange={(e) => { setSearchQuery(e.target.value); setSearchSelection(0) }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    closeSearch()
+                  } else if (event.key === 'ArrowDown') {
+                    event.preventDefault()
+                    setSearchSelection((current) => Math.min(current + 1, Math.max(filteredSearchPages.length - 1, 0)))
+                  } else if (event.key === 'ArrowUp') {
+                    event.preventDefault()
+                    setSearchSelection((current) => Math.max(current - 1, 0))
+                  } else if (event.key === 'Enter' && filteredSearchPages.length) {
+                    event.preventDefault()
+                    selectSearchResult(filteredSearchPages[searchSelection]?.page ?? filteredSearchPages[0].page)
+                  }
+                }}
                 className="w-full text-xs font-bold outline-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 bg-transparent"
               />
-              <button onClick={() => { setShowSearchModal(false); setSearchQuery('') }} className="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-md px-1.5 py-0.5 font-mono">ESC</button>
+              <button onClick={closeSearch} className="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-md px-1.5 py-0.5 font-mono">ESC</button>
             </div>
             <div className="space-y-1 text-xs">
               <p className="text-[10px] font-bold uppercase text-slate-400 dark:text-slate-500 px-2">Workspace Navigation</p>
-              {[
-                { name: '⚡ Agent Chat — Talk to BambooLeaf', p: 'chat' as Page, keywords: 'chat agent talk bamboo' },
-                { name: 'Overview & Guarded Balance', p: 'overview' as Page, keywords: 'overview dashboard balance home' },
-                { name: '💸 Transact — Manual Send & Swap', p: 'transact' as Page, keywords: 'transact send swap manual transfer' },
-                { name: 'Activity Log & Chain Hashes', p: 'activity' as Page, keywords: 'activity log audit chain hash history' },
-                { name: 'Pending Approvals Queue', p: 'approvals' as Page, keywords: 'approvals pending review queue' },
-                { name: 'Policy & Enforced Limits', p: 'policy' as Page, keywords: 'policy limits cap rules spending' },
-                { name: 'Autonomy & Permission Levels', p: 'autonomy' as Page, keywords: 'autonomy level permission trust' },
-                { name: 'Sepolia Testnet Wallet', p: 'wallet' as Page, keywords: 'wallet eth usdc sepolia testnet crypto' },
-                { name: 'Attack Arena Sandbox', p: 'arena' as Page, keywords: 'attack arena sandbox test security' },
-                { name: 'Read-only Compliance Console', p: 'compliance' as Page, keywords: 'compliance auditor audit export verify autonomy policy history' },
-                { name: 'Settings & Security Defaults', p: 'settings' as Page, keywords: 'settings config security preferences' },
-              ]
-                .filter((item) => {
-                  if (!searchQuery.trim()) return true
-                  const q = searchQuery.toLowerCase()
-                  return item.name.toLowerCase().includes(q) || item.keywords.includes(q)
-                })
-                .map((item) => (
+              {filteredSearchPages.map((item, index) => (
                 <button
                   key={item.name}
-                  onClick={() => {
-                    navigate(item.p)
-                    setShowSearchModal(false)
-                    setSearchQuery('')
-                  }}
-                  className="flex items-center justify-between w-full px-3 py-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-200 font-bold text-left transition"
+                  onMouseEnter={() => setSearchSelection(index)}
+                  onClick={() => selectSearchResult(item.page)}
+                  className={`flex items-center justify-between w-full px-3 py-2 rounded-xl text-slate-700 dark:text-slate-200 font-bold text-left transition ${index === searchSelection ? 'bg-slate-100 dark:bg-slate-800/80' : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'}`}
                 >
                   <span>{item.name}</span>
-                  <span className="text-[10px] text-slate-400 dark:text-slate-500">Jump →</span>
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500">Open ↵</span>
                 </button>
               ))}
-              {searchQuery.trim() && [
-                { name: '⚡ Agent Chat — Talk to BambooLeaf', p: 'chat' as Page, keywords: 'chat agent talk bamboo' },
-                { name: 'Overview & Guarded Balance', p: 'overview' as Page, keywords: 'overview dashboard balance home' },
-                { name: 'Activity Log & Chain Hashes', p: 'activity' as Page, keywords: 'activity log audit chain hash history' },
-                { name: 'Pending Approvals Queue', p: 'approvals' as Page, keywords: 'approvals pending review queue' },
-                { name: 'Policy & Enforced Limits', p: 'policy' as Page, keywords: 'policy limits cap rules spending' },
-                { name: 'Autonomy & Permission Levels', p: 'autonomy' as Page, keywords: 'autonomy level permission trust' },
-                { name: 'Sepolia Testnet Wallet', p: 'wallet' as Page, keywords: 'wallet eth usdc sepolia testnet crypto' },
-                { name: 'Attack Arena Sandbox', p: 'arena' as Page, keywords: 'attack arena sandbox test security' },
-                { name: 'Read-only Compliance Console', p: 'compliance' as Page, keywords: 'compliance auditor audit export verify autonomy policy history' },
-                { name: 'Settings & Security Defaults', p: 'settings' as Page, keywords: 'settings config security preferences' },
-              ].filter((item) => {
-                const q = searchQuery.toLowerCase()
-                return item.name.toLowerCase().includes(q) || item.keywords.includes(q)
-              }).length === 0 && (
+              {filteredSearchPages.length === 0 && (
                 <p className="text-center text-slate-400 py-4 text-xs">No results for "{searchQuery}"</p>
               )}
             </div>

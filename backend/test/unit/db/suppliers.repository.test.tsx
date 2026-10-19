@@ -4,6 +4,7 @@ import {
   approveSupplierChange,
   createSupplier,
   getVerifiedSupplierRecipients,
+  removeSupplier,
   requestSupplierChange,
 } from '../../../src/db/repositories/suppliers.repository.tsx'
 
@@ -18,6 +19,11 @@ function createDatabase() {
         async findOne(filter) {
           const record = records.get(String(filter.supplierId))
           return record && matches(record, filter) ? record : null
+        },
+        find(filter) {
+          return {
+            toArray: async () => [...records.values()].filter((record) => matches(record, filter)),
+          }
         },
         async updateOne(filter, update) {
           const record = records.get(String(filter.supplierId))
@@ -41,6 +47,7 @@ function matches(record: Record<string, unknown>, filter: Record<string, unknown
       const operators = expected as Record<string, unknown>
       if ('$ne' in operators) return actual !== operators.$ne
       if ('$exists' in operators) return (actual !== undefined) === operators.$exists
+      if ('$in' in operators) return (operators.$in as unknown[]).includes(actual)
     }
     return actual === expected
   })
@@ -96,4 +103,20 @@ test('only separately approved supplier payout addresses enter the trusted recip
   })
 
   assert.deepEqual(recipients, ['0x0000000000000000000000000000000000000003'])
+})
+
+test('removed suppliers are retained for history and excluded from trusted recipients', async () => {
+  const database = createDatabase()
+  const supplier = await createSupplier(database, {
+    name: 'Archived Supplier',
+    payoutAccount: '0x0000000000000000000000000000000000000004',
+    requestedBy: '0xrequester',
+  })
+  await approveSupplierChange(database, supplier.supplierId, '0xapprover')
+
+  const removed = await removeSupplier(database, supplier.supplierId, '0xadmin')
+  assert.equal(removed.status, 'removed')
+  assert.equal(removed.removedBy, '0xadmin')
+  assert.equal(await removeSupplier(database, supplier.supplierId, '0xadmin'), null)
+  assert.deepEqual(await getVerifiedSupplierRecipients(database), [])
 })

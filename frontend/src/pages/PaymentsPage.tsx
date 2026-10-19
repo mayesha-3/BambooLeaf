@@ -132,6 +132,22 @@ export default function PaymentsPage() {
     })
   }
 
+  async function removeSupplier(supplier: Supplier) {
+    if (!window.confirm(`Remove ${supplier.name} from the active supplier registry? Historical invoices and purchase orders will be retained.`)) return
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      await sendJson(`/suppliers/${supplier.supplierId}`, 'DELETE')
+      setNotice(`${supplier.name} was removed from the active registry. Historical records were retained.`)
+      await loadData()
+    } catch (removeError) {
+      setError(removeError instanceof Error ? removeError.message : 'Could not remove supplier.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <>
       <PageHeading
@@ -146,7 +162,7 @@ export default function PaymentsPage() {
       <div className="grid gap-5 xl:grid-cols-2">
         <Card className="p-5">
           <h2 className="text-sm font-bold">Verified supplier registry</h2>
-          <p className="mb-4 mt-1 text-xs text-slate-500">New and changed payout details require a different approver before they become active.</p>
+          <p className="mb-4 mt-1 text-xs text-slate-500">New and changed payout details require a different approver before they become active. Admins can remove a supplier from the active registry; historical records are retained and in-flight invoices prevent removal.</p>
           {role === 'admin' && (
             <div className="space-y-3 border-b pb-4">
               <form onSubmit={(event) => void runAction(event, async () => {
@@ -195,6 +211,16 @@ export default function PaymentsPage() {
                       await loadData()
                     }).catch((actionError: unknown) => setError(actionError instanceof Error ? actionError.message : 'Approval failed.')).finally(() => setBusy(false))
                   }} className="mt-3 rounded-lg bg-lime-600 px-3 py-2 text-xs font-bold text-white">Approve as second approver</button>
+                )}
+                {role === 'admin' && supplier.status !== 'removed' && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void removeSupplier(supplier)}
+                    className="mt-3 rounded-lg border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50"
+                  >
+                    Remove from registry
+                  </button>
                 )}
               </div>
             ))}

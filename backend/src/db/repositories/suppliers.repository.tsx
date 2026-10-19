@@ -39,6 +39,26 @@ async function requestSupplierChange(database, supplierId, change, requestedBy) 
   return result.modifiedCount === 1 ? { ...supplier, pendingChange } : null
 }
 
+async function removeSupplier(database, supplierId, removedBy) {
+  const result = await database.collection(COLLECTIONS.suppliers).updateOne(
+    { supplierId, status: { $in: ['active', 'pending_approval'] } },
+    {
+      $set: {
+        status: 'removed',
+        removedBy,
+        removedAt: new Date(),
+        updatedAt: new Date(),
+      },
+      $unset: { pendingChange: '' },
+    },
+  )
+  if (result.modifiedCount !== 1) return null
+  return database.collection(COLLECTIONS.suppliers).findOne(
+    { supplierId },
+    { projection: { _id: 0 } },
+  )
+}
+
 async function approveSupplierChange(database, supplierId, approvedBy) {
   const collection = database.collection(COLLECTIONS.suppliers)
   const supplier = await collection.findOne({ supplierId })
@@ -100,6 +120,7 @@ export {
   getVerifiedSupplierRecipients,
   normalizeSupplierName,
   policyWithVerifiedSupplierRecipients,
+  removeSupplier,
   requestSupplierChange,
   setPurchaseOrder,
 }

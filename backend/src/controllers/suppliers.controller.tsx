@@ -6,6 +6,7 @@ import { getDatabase } from '../db/connection.tsx'
 import {
   approveSupplierChange,
   createSupplier,
+  removeSupplier,
   requestSupplierChange,
   setPurchaseOrder,
 } from '../db/repositories/suppliers.repository.tsx'
@@ -85,6 +86,44 @@ async function editSupplier(request, response, next) {
       response.status(409).json({ error: 'The requested supplier name is already registered.' })
       return
     }
+    next(error)
+  }
+}
+
+async function deleteSupplier(request, response, next) {
+  const supplierId = request.params.supplierId
+  if (!supplierIdPattern.test(supplierId)) {
+    response.status(400).json({ error: 'Supplier identifier is invalid.' })
+    return
+  }
+  try {
+    const database = getDatabase()
+    const supplier = await database.collection(COLLECTIONS.suppliers)
+      .findOne({ supplierId, status: { $in: ['active', 'pending_approval'] } })
+    if (!supplier) {
+      response.status(404).json({ error: 'Active or pending supplier was not found.' })
+      return
+    }
+    const pendingInvoice = await database.collection(COLLECTIONS.invoices).findOne(
+      { supplierId, status: { $in: ['processing', 'awaiting_approval'] } },
+      { projection: { _id: 0, invoiceId: 1 } },
+    )
+    if (pendingInvoice) {
+      response.status(409).json({ error: 'Supplier cannot be removed while an invoice is processing or awaiting approval.' })
+      return
+    }
+    const removed = await removeSupplier(database, supplierId, request.deviceSession.walletAddress)
+    if (!removed) {
+      response.status(409).json({ error: 'Supplier status changed; refresh the registry and try again.' })
+      return
+    }
+    await appendAuditEvent(database, {
+      requestId: request.requestId || randomUUID(),
+      type: 'supplier.removed',
+      data: { supplierId, removedBy: request.deviceSession.walletAddress },
+    })
+    response.json({ supplier: safeSupplier(removed), message: 'Supplier removed from the active registry. Historical records are retained.' })
+  } catch (error) {
     next(error)
   }
 }
@@ -174,4 +213,4 @@ async function addPurchaseOrder(request, response, next) {
   }
 }
 
-export { addPurchaseOrder, addSupplier, approveSupplier, editSupplier, listPurchaseOrders, listSuppliers }
+export { addPurchaseOrder, addSupplier, approveSupplier, deleteSupplier, editSupplier, listPurchaseOrders, listSuppliers }
