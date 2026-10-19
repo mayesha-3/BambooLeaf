@@ -1,6 +1,11 @@
 import mongoose from 'mongoose'
 import { ensureIndexes } from './indexes.tsx'
 import { migrateInitialCollections } from './migrations/001-initial-collections.tsx'
+import { loadAutonomyState, saveAutonomyState } from './repositories/autonomy.repository.tsx'
+import { getState, restoreState } from '../guard/autonomy-manager.tsx'
+import { readPolicyConfig } from '../guard/policy-engine.tsx'
+import { capturePolicyVersion } from './repositories/policy-versions.repository.tsx'
+import { loadRuntimePolicy } from './repositories/runtime-policy.repository.tsx'
 
 let database
 
@@ -33,6 +38,14 @@ async function connectDatabase() {
   try {
     await migrateInitialCollections(database)
     await ensureIndexes(database)
+    await loadRuntimePolicy(database)
+    await capturePolicyVersion(database, readPolicyConfig())
+    const savedAutonomyState = await loadAutonomyState(database)
+    if (savedAutonomyState) {
+      restoreState(savedAutonomyState)
+    } else {
+      await saveAutonomyState(database, getState())
+    }
     return database
   } catch (error) {
     database = undefined

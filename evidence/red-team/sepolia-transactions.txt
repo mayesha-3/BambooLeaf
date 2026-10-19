@@ -1,16 +1,45 @@
-Sepolia Transactions
-====================
+Sepolia Transactions & Execution Evidence
+=========================================
 Wallet: 0xe2484B945d8dD3735Fa821Ff253ff20f8A43B1Dd
-Date: 2026-10-15
+Network: Ethereum Sepolia Testnet
 
-[1] Faucet Airdrop — 0.05 ETH
+--- SECTION 1: FAUCET FUNDING ---
+
+[1] Google Cloud Faucet — 0.05 ETH
     Tx Hash: 0x3a4c151b143012da6fb5561ded39a2518d9694adec2c41775bf714935cb850f6
-    Block: 11920740
-    Explorer: https://sepolia.etherscan.io/tx/0x3a4c151b143012da6fb5561ded39a2518d9694adec2c41775bf714935cb850f6
     Status: SUCCESS
 
-[2] Agent Transfer — 0.001 ETH
+[2] Google Cloud Faucet — 0.05 ETH
+    Tx Hash: 0x50810abe49805cc597146e50bfd21915829bafa3e133d81f685e814a7ec0bbaf
+    Status: SUCCESS
+
+[3] Google Cloud Faucet — 0.05 ETH
+    Tx Hash: 0x4652b23a3501b5c9e5689671aafcf7e31cbee850e2cb102233968ca72540cbe1
+    Status: SUCCESS
+
+[4] Aave Faucet — 20 USDC
+    Tx Hash: 0xdeebeb7f7ea50e5d69848f05fe9576f8df8237d17dfc44412be158daa9ad70cb
+    Status: SUCCESS
+
+--- SECTION 2: AGENT EXECUTION (AUTOMATED) ---
+
+[5] Agent Transfer — 0.001 ETH
     Tx Hash: 0xf19435f093d10fd5ebe11aea798244d5598828c544e464456010c9565eae2aa1
-    Block: 11921068
-    Explorer: https://sepolia.etherscan.io/tx/0xf19435f093d10fd5ebe11aea798244d5598828c544e464456010c9565eae2aa1
+    Status: SUCCESS
+
+[6] Approve (Permission for Swap)
+    Tx Hash: 0xe8db089c54c9c490a29e624a343b3c3763d918cbbca15d20e1395a75ee5f19c0
+    Status: SUCCESS
+
+[7] Swap Execution (USDC to WETH)
+    Tx Hash: 0xab9ed80a4db8f398b15b58ee5683a8de016fd9b08ac53a2f6eb09e2320f3345a
+    Status: SUCCESS
+[8] Approve (Swap) — 5 USDC to Uniswap
+    Tx Hash: 0xd68d01408a9c071a8f565840fb630d0f225d2a538ec23d5d99df150dbb240a29
+    Block: 11935219
+    Status: SUCCESS
+
+[9] Swap Execution — 5 USDC to WETH
+    Tx Hash: 0x86e3b7ac628f722fb7207578b0baf61ca1a1135b1acce40904e6c9bc003bcf75
+    Block: 11935219
     Status: SUCCESS

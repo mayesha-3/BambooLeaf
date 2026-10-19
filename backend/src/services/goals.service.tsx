@@ -1,14 +1,100 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { COLLECTIONS } from '../db/collections.tsx'
 import { appendAuditEvent } from '../audit/audit-log.tsx'
-import { planGoal } from '../agent/planner.tsx'
+import { planGoal } from '../../llm-planner/src/backend-bridge.ts'
 import { evaluateNativeTransfer, evaluateSwap, readPolicyConfig } from '../guard/policy-engine.tsx'
 import { routeTier } from '../guard/tier-router.tsx'
-import { getLevel } from '../guard/autonomy-manager.tsx'
+import {
+  getLevel,
+  getState,
+  isKillSwitchActive,
+  recordBlockedAttempt,
+  recordCleanExecution,
+} from '../guard/autonomy-manager.tsx'
+import { saveAutonomyState } from '../db/repositories/autonomy.repository.tsx'
+import { createTransferApproval } from './approvals.service.tsx'
 import { reserveTransfer } from '../db/repositories/policy-usage.repository.tsx'
 import { getSigner, getSignerAddress, sendAuthorizedNativeTransfer, sendAuthorizedSwap, simulateAuthorizedSwap } from '../signer/signer-service.tsx'
 import { getToken } from '../chain/token-registry.tsx'
+import { getWalletSnapshot } from '../chain/wallet-snapshot.tsx'
 import { parseUnits } from 'ethers'
+import { policyWithVerifiedSupplierRecipients } from '../db/repositories/suppliers.repository.tsx'
+import { getAddress } from 'ethers'
+import { intentSchema } from '../guard/intent.schema.tsx'
+
+const blockedCodes = new Set([
+  'UNTRUSTED_CONTENT_FLAGGED',
+  'QUARANTINE_FAILED',
+  'INPUT_INVALID',
+  'MODEL_REFUSED',
+  'INVALID_OUTPUT',
+  'UNGROUNDED_RECIPIENT',
+  'UNKNOWN_CONTACT',
+  'PROVIDERS_UNAVAILABLE',
+  'BUDGET_EXCEEDED',
+  'APPROVAL_EXPIRED',
+  'DIGEST_MISMATCH',
+  'SIMULATION_FAILED',
+  'TIER_3_FORBIDDEN',
+])
+
+const autonomyFreezeCodes = new Set([
+  'UNTRUSTED_CONTENT_FLAGGED',
+  'UNGROUNDED_RECIPIENT',
+  'DIGEST_MISMATCH',
+  'TIER_3_FORBIDDEN',
+])
+
+async function recordBlocked(database, requestId, reason, critical = false) {
+  const previous = getState()
+  recordBlockedAttempt(reason, critical)
+  const current = getState()
+  await saveAutonomyState(database, current)
+  if (previous.level !== current.level || previous.frozen !== current.frozen) {
+    await appendAuditEvent(database, {
+      requestId,
+      type: 'autonomy.demoted',
+      data: {
+        fromLevel: previous.level,
+        toLevel: current.level,
+        reason,
+        blockedInWindow: current.blockedInWindow,
+        frozen: current.frozen,
+      },
+    })
+  }
+  await appendAuditEvent(database, {
+    requestId,
+    type: 'autonomy.blocked_attempt',
+    data: { reason, critical, level: current.level, frozen: current.frozen },
+  })
+}
+
+async function recordClean(database, requestId) {
+  const previous = getState()
+  recordCleanExecution()
+  const current = getState()
+  if (previous.level !== current.level) {
+    await appendAuditEvent(database, {
+      requestId,
+      type: 'autonomy.promoted',
+      data: {
+        fromLevel: previous.level,
+        toLevel: current.level,
+        reason: 'Ten clean confirmed executions',
+      },
+    })
+  }
+  try {
+    await saveAutonomyState(database, current)
+  } catch (error) {
+    await appendAuditEvent(database, {
+      requestId,
+      type: 'autonomy.state_persistence_failed',
+      data: { reason: error instanceof Error ? error.message : 'Unknown persistence failure' },
+    })
+  }
+}
 
 function goalHash(goal) {
   return createHash('sha256').update(goal).digest('hex')
@@ -19,8 +105,8 @@ function intentSummary(intent) {
     intentId: intent.intentId,
     action: intent.action,
     chainId: intent.chainId,
-    token: intent.from.token,
-    amount: intent.from.amount ?? null,
+    token: intent.from?.token ?? intent.token ?? null,
+    amount: intent.from?.amount ?? null,
     recipient: intent.recipient ?? null,
     targetToken: intent.to?.token ?? null,
   }
@@ -84,11 +170,24 @@ async function processSwap(database, intent, summary, policy, requestId) {
   })
   if (tier.tier !== 'T1') {
     const status = tier.tier === 'T2' ? 'approval_required' : 'denied'
+    if (tier.tier === 'T3') {
+      await recordBlocked(database, requestId, tier.reasons.join('; '))
+    }
     await appendAuditEvent(database, {
       requestId, type: tier.tier === 'T2' ? 'approval.required' : 'policy.denied',
-      data: { ...summary, tier: tier.tier, reasons: tier.reasons },
+      data: { ...summary, tier: tier.tier, reasons: tier.reasons, approvalAvailable: false },
     })
-    return { statusCode: 200, body: { requestId, status, tier: tier.tier, intent: summary, reasons: tier.reasons } }
+    return {
+      statusCode: 200,
+      body: {
+        requestId,
+        status,
+        tier: tier.tier,
+        intent: summary,
+        reasons: tier.reasons,
+        ...(tier.tier === 'T2' ? { approvalAvailable: false, reason: 'Human approval is not enabled for swaps.' } : {}),
+      },
+    }
   }
 
   try {
@@ -129,8 +228,9 @@ async function processSwap(database, intent, summary, policy, requestId) {
       }),
     })
   } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Shadow simulation failed'
     await appendAuditEvent(database, {
-      requestId, type: 'swap.shadow_simulation_failed', data: { ...summary, reason: error.message },
+      requestId, type: 'swap.shadow_simulation_failed', data: { ...summary, reason },
     })
     return { statusCode: 409, body: { requestId, status: 'not_executed', intent: summary, error: 'Shadow-fork simulation or intent/outcome check failed.' } }
   }
@@ -152,30 +252,62 @@ async function processSwap(database, intent, summary, policy, requestId) {
       txHash: transaction.txHash,
       digest: transaction.digest,
       approvalDigests: transaction.approvalDigests,
+      approvalTxHashes: transaction.approvalTxHashes,
       amountIn: transaction.amountIn,
       minAmountOut: transaction.minAmountOut,
     },
   })
+  await recordClean(database, requestId)
   return {
     statusCode: 200,
     body: {
       requestId, status: transaction.status, tier: tier.tier, intent: summary,
       txHash: transaction.txHash, amountIn: transaction.amountIn, minAmountOut: transaction.minAmountOut,
+      approvalTxHashes: transaction.approvalTxHashes,
     },
   }
 }
 
-async function processGoal(database, goal, requestId) {
+async function processGoal(
+  database,
+  goal,
+  requestId,
+  untrusted?: string[],
+  dependencies: { planGoal?: typeof planGoal; getWalletSnapshot?: typeof getWalletSnapshot } = {},
+  trustedPayment?: { intent; supplierId: string; invoiceId: string },
+) {
+  const planner = dependencies.planGoal ?? planGoal
+  const readWalletSnapshot = dependencies.getWalletSnapshot ?? getWalletSnapshot
   await appendAuditEvent(database, {
     requestId,
     type: 'goal.received',
-    data: { goalSha256: goalHash(goal) },
+    data: { goalSha256: goalHash(goal), hasUntrusted: Array.isArray(untrusted) && untrusted.length > 0 },
   })
 
-  let intent
+  let intent = trustedPayment?.intent
   try {
-    intent = await planGoal(goal, Number(process.env.CHAIN_ID || 31337))
+    if (!intent) intent = await planner(goal, Number(process.env.CHAIN_ID || 31337), untrusted)
   } catch (error) {
+    const code = error.code || undefined
+    if (code && blockedCodes.has(code)) {
+      if (autonomyFreezeCodes.has(code)) {
+        await recordBlocked(
+          database,
+          requestId,
+          `${code}: ${error.message}`,
+          code === 'UNTRUSTED_CONTENT_FLAGGED',
+        )
+      }
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'planner.blocked',
+        data: { code, reason: error.message },
+      })
+      return {
+        statusCode: 200,
+        body: { requestId, status: 'blocked', code, error: error.message || 'Blocked, nothing executed.' },
+      }
+    }
     await appendAuditEvent(database, {
       requestId,
       type: 'planner.failed',
@@ -187,16 +319,82 @@ async function processGoal(database, goal, requestId) {
     }
   }
 
-  const summary = intentSummary(intent)
+  const parsedIntent = intentSchema.safeParse(intent)
+  if (!parsedIntent.success) {
+    return { statusCode: 400, body: { requestId, status: 'not_executed', error: 'Trusted payment intent failed validation.' } }
+  }
+  intent = parsedIntent.data
+  if (trustedPayment?.supplierId) {
+    const supplier = await database.collection(COLLECTIONS.suppliers).findOne({ supplierId: trustedPayment.supplierId, status: 'active' })
+    if (!supplier || getAddress(supplier.payoutAccount).toLowerCase() !== getAddress(intent.recipient).toLowerCase()) {
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'invoice.supplier_registry_changed',
+        data: { invoiceId: trustedPayment.invoiceId, supplierId: trustedPayment.supplierId, reason: 'Supplier is no longer active or its registered payout address changed' },
+      })
+      return { statusCode: 409, body: { requestId, status: 'blocked', error: 'Verified supplier payout details changed; human review is required.' } }
+    }
+  }
+  const summary = {
+    ...intentSummary(intent),
+    ...(trustedPayment ? { supplierId: trustedPayment.supplierId, invoiceId: trustedPayment.invoiceId } : {}),
+  }
   await appendAuditEvent(database, {
     requestId,
     type: 'intent.proposed',
     data: summary,
   })
 
+  if (intent.action === 'read_balance') {
+    try {
+      const balance = await readWalletSnapshot()
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'wallet.balance_read',
+        data: { chainId: balance.chainId },
+      })
+      return {
+        statusCode: 200,
+        body: { requestId, status: 'success', intent: summary, data: balance },
+      }
+    } catch (error) {
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'wallet.balance_read_failed',
+        data: { reason: error instanceof Error ? error.message : 'Unknown wallet read error' },
+      })
+      return {
+        statusCode: 503,
+        body: {
+          requestId,
+          status: 'not_executed',
+          error: error instanceof Error ? error.message : 'Unable to read wallet balance.',
+        },
+      }
+    }
+  }
+
+  if (isKillSwitchActive()) {
+    await appendAuditEvent(database, {
+      requestId,
+      type: 'planner.blocked',
+      data: { code: 'KILL_SWITCH_ACTIVE', reason: 'Agent is frozen; transaction execution is disabled' },
+    })
+    return {
+      statusCode: 423,
+      body: {
+        requestId,
+        status: 'blocked',
+        code: 'KILL_SWITCH_ACTIVE',
+        error: 'Agent is frozen; transaction was not executed. An owner must reset autonomy before sending transactions.',
+      },
+    }
+  }
+
   let policy
   try {
     policy = readPolicyConfig()
+    if (trustedPayment) policy = await policyWithVerifiedSupplierRecipients(database, policy)
   } catch (error) {
     await appendAuditEvent(database, {
       requestId,
@@ -220,6 +418,62 @@ async function processGoal(database, goal, requestId) {
     return {
       statusCode: 200,
       body: { requestId, status: 'denied', intent: summary, reason: decision.reason },
+    }
+  }
+
+  const tier = routeTier({
+    intent,
+    allowedRecipients: policy.allowedRecipients,
+    allowedContracts: policy.allowedContracts,
+    maxPerTxWei: policy.maxPerTxWei,
+    valueWei: BigInt(decision.valueWei),
+    riskScore: 0,
+    forbiddenPatterns: [],
+    autonomyLevel: getLevel(),
+  })
+  await appendAuditEvent(database, {
+    requestId,
+    type: 'policy.tier_routed',
+    data: { ...summary, tier: tier.tier, reasons: tier.reasons },
+  })
+  if (tier.tier !== 'T1') {
+    if (tier.tier === 'T3') {
+      await recordBlocked(database, requestId, tier.reasons.join('; '))
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'policy.denied',
+        data: { ...summary, tier: tier.tier, reasons: tier.reasons },
+      })
+      return { statusCode: 200, body: { requestId, status: 'denied', tier: tier.tier, intent: summary, reasons: tier.reasons } }
+    }
+    try {
+      const approval = await createTransferApproval(database, intent, requestId, trustedPayment?.invoiceId)
+      return {
+        statusCode: 202,
+        body: {
+          requestId,
+          status: 'approval_required',
+          tier: tier.tier,
+          intent: summary,
+          reasons: approval.reasons,
+          approval: { id: approval.approvalId, digest: approval.digest, expiresAt: approval.expiresAt },
+        },
+      }
+    } catch (error) {
+      await appendAuditEvent(database, {
+        requestId,
+        type: 'approval.creation_failed',
+        data: { ...summary, reason: error instanceof Error ? error.message : 'Unable to create approval request' },
+      })
+      return {
+        statusCode: error.statusCode || 503,
+        body: {
+          requestId,
+          status: 'not_executed',
+          intent: summary,
+          error: error instanceof Error ? error.message : 'Unable to create approval request.',
+        },
+      }
     }
   }
 
@@ -294,13 +548,48 @@ async function processGoal(database, goal, requestId) {
     type: 'transaction.confirmed',
     data: { ...summary, txHash: transaction.txHash, digest: transaction.digest },
   })
+  await recordClean(database, requestId)
   return {
     statusCode: 200,
     body: { requestId, status: transaction.status, intent: summary, txHash: transaction.txHash },
   }
 }
 
-async function submitGoal(database, goal, idempotencyKey) {
+async function submitVerifiedSupplierPayment(database, invoiceId, requestId) {
+  const invoice = await database.collection(COLLECTIONS.invoices).findOne({ invoiceId, status: 'processing' })
+  if (!invoice) throw new Error('Invoice is not in a payable processing state.')
+  const supplier = await database.collection(COLLECTIONS.suppliers).findOne({
+    supplierId: invoice.supplierId,
+    status: 'active',
+  })
+  if (!supplier || getAddress(invoice.invoiceAccount).toLowerCase() !== getAddress(supplier.payoutAccount).toLowerCase()) {
+    throw new Error('Invoice does not match the currently verified supplier registry.')
+  }
+  const intent = intentSchema.parse({
+    intentId: randomUUID(),
+    action: 'transfer',
+    chainId: Number(process.env.CHAIN_ID || 31337),
+    from: { token: 'ETH', amount: invoice.amountEth },
+    recipient: getAddress(supplier.payoutAccount),
+    rationale: 'Verified supplier invoice payment',
+    sourceRefs: [],
+  })
+  await appendAuditEvent(database, {
+    requestId,
+    type: 'invoice.payment_proposed',
+    data: { invoiceId, supplierId: supplier.supplierId, amountEth: invoice.amountEth },
+  })
+  return processGoal(
+    database,
+    `Pay verified supplier invoice ${invoiceId}`,
+    requestId,
+    undefined,
+    undefined,
+    { intent, supplierId: supplier.supplierId, invoiceId },
+  )
+}
+
+async function submitGoal(database, goal, idempotencyKey, untrusted?: string[]) {
   const goals = database.collection(COLLECTIONS.goals)
   const requestId = randomUUID()
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
@@ -323,7 +612,7 @@ async function submitGoal(database, goal, idempotencyKey) {
   }
 
   try {
-    const result = await processGoal(database, goal, requestId)
+    const result = await processGoal(database, goal, requestId, untrusted)
     await goals.updateOne(
       { idempotencyKey },
       { $set: { status: 'complete', statusCode: result.statusCode, body: result.body } },
@@ -338,4 +627,4 @@ async function submitGoal(database, goal, idempotencyKey) {
   }
 }
 
-export { submitGoal }
+export { processGoal, submitGoal, submitVerifiedSupplierPayment }

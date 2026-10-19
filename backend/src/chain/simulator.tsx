@@ -126,9 +126,11 @@ export async function simulateShadowFork(
   { accounts = [from], tokenAddresses = [] }: { accounts?: string[]; tokenAddresses?: string[] } = {},
 ) {
   const network = await provider.getNetwork()
-  if (Number(network.chainId) !== 31337) {
-    throw new Error('Shadow-fork simulation requires a local Anvil/Hardhat fork on chain ID 31337')
+  const allowedChainIds = [31337, 11155111] // Allow local Anvil or Sepolia Fork
+  if (!allowedChainIds.includes(Number(network.chainId))) {
+    throw new Error(`Shadow-fork simulation requires a local Anvil/Hardhat fork (Chain ID 31337 or 11155111). Current: ${network.chainId}`)
   }
+
   if (transactions.length === 0) throw new Error('Shadow-fork simulation requires at least one transaction')
 
   const snapshot = await rpc(provider, 'evm_snapshot', [])
@@ -159,9 +161,11 @@ export async function simulateShadowFork(
       }])
       const receipt = await provider.waitForTransaction(txHash)
       if (!receipt || receipt.status !== 1) throw new Error(`Fork transaction ${txHash} failed`)
-      receipts.push(receipt)
+            receipts.push(receipt)
       const trace = await rpc(provider, 'debug_traceTransaction', [txHash, { tracer: 'callTracer' }])
-      traceAddresses(trace).forEach((address) => calledAddresses.add(address))
+      for (const address of traceAddresses(trace)) {
+        calledAddresses.add(address)
+      }
     }
     const after = await readTokenBalances(provider, accounts, tokenAddresses)
     const balanceDeltas = Object.fromEntries(

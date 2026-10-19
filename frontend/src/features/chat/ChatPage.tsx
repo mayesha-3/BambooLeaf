@@ -1,14 +1,28 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import type { UserProfile } from '../../types'
+import { authenticatedFetch } from '../../lib/device-session'
 
-interface BalanceCard { kind: 'balance'; eth: string; usdc: string; total: string; change: string }
+interface BalanceCard { kind: 'balance'; eth: string; usdc: string; total: string; change: string; chainId?: number }
 interface TransactionCard { kind: 'transaction'; status: 'confirmed' | 'pending' | 'blocked'; type: string; amount: string; to: string; hash?: string; reason?: string }
 interface PolicyCard { kind: 'policy'; perTxCap: string; dailyCap: string; usedToday: string; autonomyLevel: string }
-interface ApprovalCard { kind: 'approval'; description: string; amount: string; expires: string; onApprove?: () => void; onReject?: () => void }
+interface ApprovalCard { kind: 'approval'; description: string; amount: string; expires: string; approvalId?: string }
 interface SwapCard { kind: 'swap'; from: string; to: string; amount: string; rate: string; status: 'proposed' | 'approved' | 'blocked' }
 type RichCard = BalanceCard | TransactionCard | PolicyCard | ApprovalCard | SwapCard
 type MessageRole = 'user' | 'agent' | 'system'
 interface ToolCall { name: string; status: 'running' | 'done' | 'failed'; detail?: string }
-interface Message { id: string; role: MessageRole; text?: string; cards?: RichCard[]; toolCalls?: ToolCall[]; ts: Date }
+interface Message { id: string; role: MessageRole; text?: string; untrusted?: string[]; cards?: RichCard[]; toolCalls?: ToolCall[]; ts: Date }
+interface GoalIntentSummary { action?: string; amount?: string | null; token?: string; recipient?: string | null }
+interface GoalApiResponse {
+  status?: string
+  txHash?: string
+  reason?: string
+  error?: string
+  code?: string
+  intent?: GoalIntentSummary
+  data?: { balanceEth?: string; balanceUsdc?: string; chainId?: number }
+  approvalId?: string
+  approval?: { id?: string; digest?: string; expiresAt?: number }
+}
 
 function Icon({ d, size = 18, className = '' }: { d: ReactNode; size?: number; className?: string }) {
   return (
@@ -29,6 +43,7 @@ const Icons = {
   arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
   lock: <><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>,
   external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6" /></>,
+  paperclip: <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />,
 }
 
 function BalanceCardView({ card }: { card: BalanceCard }) {
@@ -36,7 +51,7 @@ function BalanceCardView({ card }: { card: BalanceCard }) {
     <div className="mt-2 rounded-2xl border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-[0_4px_20px_rgba(0,0,0,0.04)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.3)] overflow-hidden max-w-[340px]">
       <div className="px-5 py-4 flex items-center justify-between" style={{ background: 'linear-gradient(135deg, #84CC16 0%, #4D7C0F 100%)' }}>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-lime-50/80 font-mono">Guarded wallet · Sepolia</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-lime-50/80 font-mono">Guarded wallet · Chain {card.chainId ?? '—'}</p>
           <p className="text-2xl font-black text-white mt-1 tracking-tight font-display">{card.total}</p>
         </div>
         <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
@@ -95,7 +110,57 @@ function PolicyCardView({ card }: { card: PolicyCard }) {
 }
 
 function ApprovalCardView({ card }: { card: ApprovalCard }) {
-  const [voted, setVoted] = useState<'approved' | 'rejected' | null>(null)
+  const hasSession = Boolean(window.sessionStorage.getItem('bambooleaf-device-session'))
+  const [status, setStatus] = useState<'checking' | 'pending' | 'executing' | 'approved' | 'rejected' | 'failed' | 'expired' | 'closed' | 'error'>(
+    card.approvalId && hasSession ? 'checking' : 'error',
+  )
+  const [errorMessage, setErrorMessage] = useState(
+    !card.approvalId
+      ? 'Approval ID is missing. Submit the transaction again.'
+      : hasSession
+        ? ''
+        : 'Sign in with your wallet to check this approval.',
+  )
+  const [txHash, setTxHash] = useState<string | null>(null)
+  const [failureReason, setFailureReason] = useState('')
+
+  useEffect(() => {
+    let active = true
+    if (!card.approvalId) return
+    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    if (!token) return
+    let timer: number | undefined
+    const poll = async () => {
+      try {
+        const response = await authenticatedFetch(`${apiBaseUrl}/approvals/${card.approvalId}`)
+        const result = await response.json() as { status?: string; txHash?: string | null; failureReason?: string | null; error?: string }
+        if (!response.ok) throw new Error(result.error || 'Could not verify approval status.')
+        if (!active) return
+        if (result.txHash) setTxHash(result.txHash)
+        if (result.failureReason) setFailureReason(result.failureReason)
+        if (result.status === 'approved') setStatus('approved')
+        else if (result.status === 'rejected') setStatus('rejected')
+        else if (result.status === 'executing') setStatus('executing')
+        else if (result.status === 'pending') setStatus('pending')
+        else if (result.status === 'expired') setStatus('expired')
+        else if (['failed', 'stale', 'denied'].includes(result.status || '')) setStatus('failed')
+        else setStatus('closed')
+        if (result.status === 'pending' || result.status === 'executing') {
+          timer = window.setTimeout(() => void poll(), 2000)
+        }
+      } catch (error) {
+        if (!active) return
+        setErrorMessage(error instanceof Error ? error.message : 'Could not verify approval status.')
+        setStatus('error')
+      }
+    }
+    void poll()
+    return () => {
+      active = false
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [card.approvalId])
+
   return (
     <div className="mt-2 rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 p-4 max-w-[340px]">
       <div className="flex items-start gap-3">
@@ -106,14 +171,20 @@ function ApprovalCardView({ card }: { card: ApprovalCard }) {
           <div className="flex gap-2 text-[11px] font-bold mt-1"><span className="text-amber-700 dark:text-amber-400">{card.amount}</span><span className="text-slate-400">·</span><span className="text-slate-500 dark:text-slate-400">Expires {card.expires}</span></div>
         </div>
       </div>
-      {!voted ? (
-        <div className="flex gap-2 mt-3">
-          <button onClick={() => { setVoted('approved'); card.onApprove?.() }} className="flex-1 bg-slate-900 hover:bg-black dark:bg-lime-400 dark:hover:bg-lime-300 text-white dark:text-slate-950 rounded-xl py-2 text-[11px] font-bold transition flex items-center justify-center gap-1.5 font-display"><Icon d={Icons.check} size={12} /> Approve</button>
-          <button onClick={() => { setVoted('rejected'); card.onReject?.() }} className="flex-1 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 rounded-xl py-2 text-[11px] font-bold border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition flex items-center justify-center gap-1.5 font-display"><Icon d={Icons.x} size={12} /> Reject</button>
+      {status === 'checking' && (
+        <div className="mt-3 rounded-xl py-2 flex justify-center items-center text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500">
+          <span className="w-3 h-3 rounded-full border-2 border-slate-400 border-t-transparent animate-spin mr-2" />
+          Checking approval status...
         </div>
-      ) : (
-        <div className={`mt-3 rounded-xl py-2 text-center text-[11px] font-bold ${voted === 'approved' ? 'bg-lime-50 dark:bg-lime-950/60 text-[#65A30D] dark:text-lime-400' : 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'}`}>{voted === 'approved' ? '✓ Transaction approved' : '✗ Transaction rejected'}</div>
       )}
+      {status === 'pending' && <div className="mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">Waiting for an admin to review this request in the Approval Queue.</div>}
+      {status === 'approved' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-lime-50 dark:bg-lime-950/60 text-[#65A30D] dark:text-lime-400">✓ Transaction confirmed{txHash ? <span className="mt-1 block break-all font-mono text-[10px]">{txHash}</span> : null}</div>}
+      {status === 'rejected' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">✗ Transaction rejected</div>}
+      {status === 'executing' && <div className="mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">Transaction broadcast; waiting for chain confirmation.{txHash ? <span className="mt-1 block break-all font-mono text-[10px]">{txHash}</span> : null}</div>}
+      {status === 'expired' && <div className="mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">Approval expired. Submit the transaction again to request a fresh approval.</div>}
+      {status === 'failed' && <div role="alert" className="mt-3 rounded-xl px-3 py-2 text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300">Transaction was not confirmed: {failureReason || 'Check Activity Log for the execution result.'}{txHash ? <span className="mt-1 block break-all font-mono text-[10px]">Broadcast transaction: {txHash}</span> : null}</div>}
+      {status === 'closed' && <div className="mt-3 rounded-xl py-2 text-center text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">This approval is closed. Check the Approval Queue for its latest status.</div>}
+      {status === 'error' && <div role="alert" className="mt-3 rounded-xl px-3 py-2 text-center text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">⚠ {errorMessage}</div>}
     </div>
   )
 }
@@ -150,35 +221,56 @@ function ToolCallIndicator({ calls }: { calls: ToolCall[] }) {
   return (
     <div className="mt-2 space-y-1.5">
       {calls.map((call, i) => (
-        <div key={i} className="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+        <div key={i} className="flex items-center gap-2 text-[11px] font-mono text-slate-500 dark:text-slate-400">
           {call.status === 'running' && <span className="w-3 h-3 rounded-full border-2 border-[#84CC16] border-t-transparent animate-spin" />}
           {call.status === 'done' && <span className="w-3 h-3 rounded-full bg-[#84CC16] flex items-center justify-center shrink-0"><svg width="7" height="7" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></span>}
           {call.status === 'failed' && <span className="w-3 h-3 rounded-full bg-rose-400 text-white text-[7px] flex items-center justify-center shrink-0">✕</span>}
-          <span className="text-slate-600">{call.name}</span>
-          {call.detail && <span className="text-slate-400">· {call.detail}</span>}
+          <span className="text-slate-600 dark:text-slate-300">{call.name}</span>
+          {call.detail && <span className="text-slate-400 dark:text-slate-500">· {call.detail}</span>}
         </div>
       ))}
     </div>
   )
 }
 
-function MessageBubble({ msg }: { msg: Message }) {
+function MessageBubble({ msg, userProfile }: { msg: Message; userProfile?: UserProfile }) {
   const isUser = msg.role === 'user'
   if (msg.role === 'system') return (
     <div className="flex justify-center py-1">
       <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 rounded-full px-3 py-1">{msg.text}</span>
     </div>
   )
+
+  const userInitial = userProfile?.name ? userProfile.name.charAt(0).toUpperCase() : 'U'
+  const userAvatarGradient = userProfile?.avatarColor || 'from-[#65A30D] to-[#84CC16]'
+  const userName = userProfile?.name || 'You'
+
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {!isUser && <div className="w-8 h-8 rounded-2xl bg-[#F0FDF4] dark:bg-lime-950/40 border border-lime-100 dark:border-lime-900/50 flex items-center justify-center shrink-0 mt-1 shadow-sm"><Icon d={Icons.spark} size={16} className="text-[#65A30D] dark:text-lime-400" /></div>}
-      {isUser && <div className="w-8 h-8 rounded-2xl bg-slate-900 dark:bg-lime-400 flex items-center justify-center shrink-0 mt-1 shadow-sm"><span className="text-white dark:text-black text-xs font-extrabold">M</span></div>}
+      {isUser && (
+        <div
+          className={`w-8 h-8 rounded-2xl bg-gradient-to-tr ${userAvatarGradient} text-white font-black text-xs flex items-center justify-center shrink-0 mt-1 shadow-sm ring-2 ring-white dark:ring-slate-800`}
+          title={userName}
+        >
+          {userInitial}
+        </div>
+      )}
       <div className={`flex-1 max-w-[85%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
         <div className={`flex items-center gap-2 mb-1 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">{isUser ? 'You' : 'BambooLeaf Agent'}</span>
+          <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
+            {isUser ? userName : 'BambooLeaf Agent'}
+          </span>
           <span className="text-[10px] text-slate-300 dark:text-slate-600">{msg.ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
         {msg.text && <div className={`px-4 py-3 rounded-2xl text-xs leading-relaxed font-medium ${isUser ? 'bg-slate-900 dark:bg-[#84CC16] text-white dark:text-slate-950 rounded-tr-sm' : 'bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 text-slate-800 dark:text-slate-100 shadow-sm rounded-tl-sm'}`}>{msg.text}</div>}
+        {msg.untrusted && msg.untrusted.length > 0 && (
+          <div className="mt-1.5 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-[11px] max-w-full">
+            <Icon d={Icons.paperclip} size={12} className="shrink-0" />
+            <span className="font-semibold shrink-0">Attached memo:</span>
+            <span className="truncate italic">{msg.untrusted.join('; ')}</span>
+          </div>
+        )}
         {msg.toolCalls && msg.toolCalls.length > 0 && <div className="mt-1 px-1"><ToolCallIndicator calls={msg.toolCalls} /></div>}
         {msg.cards?.map((card, i) => <RichCardRenderer key={i} card={card} />)}
       </div>
@@ -199,10 +291,19 @@ function TypingIndicator() {
   )
 }
 
-function ContextPanel({ width, onResizeStart }: { width: number; onResizeStart: (e: React.MouseEvent) => void }) {
+function ContextPanel({ width, onResizeStart, userProfile }: { width: number; onResizeStart: (e: React.MouseEvent) => void; userProfile?: UserProfile }) {
+  const [walletData, setWalletData] = useState<{ balanceEth: string; balanceUsdc: string } | null>(null)
+  const apiUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
+
+  useEffect(() => {
+    fetch(`${apiUrl}/wallet/balance`)
+      .then(res => res.json() as Promise<{ balanceEth: string; balanceUsdc: string }>)
+      .then(data => setWalletData(data))
+      .catch(console.error)
+  }, [apiUrl])
+
   return (
     <aside className="hidden xl:flex flex-col shrink-0 border-l border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0c1220] overflow-y-auto relative transition-colors" style={{ width }}>
-      {/* Resize handle */}
       <div
         onMouseDown={onResizeStart}
         className="absolute top-0 left-0 w-3 h-full cursor-col-resize z-10 group flex items-center justify-center transition-colors hover:bg-[#84CC16]/8"
@@ -217,10 +318,26 @@ function ContextPanel({ width, onResizeStart }: { width: number; onResizeStart: 
       </div>
       <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800/80"><p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">Live Context</p></div>
       <div className="px-5 py-4 space-y-5 flex-1">
+        {userProfile && (
+          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 flex items-center gap-3 shadow-sm">
+            <div className={`w-9 h-9 rounded-xl bg-gradient-to-tr ${userProfile.avatarColor || 'from-[#65A30D] to-[#84CC16]'} text-white font-black text-xs flex items-center justify-center shrink-0 shadow-sm ring-1 ring-white/10`}>
+              {userProfile.name?.charAt(0).toUpperCase() || 'U'}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{userProfile.name}</p>
+                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-lime-100 dark:bg-lime-950 text-[#65A30D] dark:text-lime-400">
+                  Owner
+                </span>
+              </div>
+              <p className="text-[10px] font-mono text-slate-400 truncate mt-0.5">{userProfile.handle}</p>
+            </div>
+          </div>
+        )}
+        
         <div>
           <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2.5">Wallet</p>
           <div className="rounded-2xl p-4 text-white overflow-hidden relative shadow-sm" style={{ background: 'linear-gradient(135deg, #82C91E 0%, #65A30D 100%)' }}>
-            {/* Decorative background pattern */}
             <div className="absolute top-0 right-0 w-24 h-full opacity-[0.12] pointer-events-none">
               <svg viewBox="0 0 80 120" fill="none" className="w-full h-full">
                 <circle cx="60" cy="30" r="28" stroke="white" strokeWidth="2" />
@@ -232,10 +349,12 @@ function ContextPanel({ width, onResizeStart }: { width: number; onResizeStart: 
             <div className="relative z-[1] flex items-start justify-between">
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-bold text-lime-50/70 uppercase tracking-wider">Total balance</p>
-                <p className="text-2xl font-extrabold mt-1 tracking-tight">$2,840.60</p>
+                <p className="text-2xl font-extrabold mt-1 tracking-tight">
+                  {walletData ? `${walletData.balanceEth} ETH` : 'Loading...'}
+                </p>
                 <div className="flex gap-4 mt-3 text-[11px]">
-                  <div><p className="text-lime-50/70">ETH</p><p className="font-bold">0.72 ETH</p></div>
-                  <div><p className="text-lime-50/70">USDC</p><p className="font-bold">$1,079.43</p></div>
+                  <div><p className="text-lime-50/70">ETH</p><p className="font-bold">{walletData ? walletData.balanceEth : '-'}</p></div>
+                  <div><p className="text-lime-50/70">USDC</p><p className="font-bold">{walletData ? walletData.balanceUsdc : '-'}</p></div>
                 </div>
               </div>
               <div className="w-10 h-10 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center shrink-0 ml-3 mt-1">
@@ -247,37 +366,16 @@ function ContextPanel({ width, onResizeStart }: { width: number; onResizeStart: 
             </div>
           </div>
         </div>
-        <div>
-          <div className="flex items-center justify-between mb-2.5"><p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Pending approvals</p><span className="bg-amber-400 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-full">2</span></div>
-          <div className="space-y-2">
-            {[{ label: 'Swap 12 USDC → ETH', sub: 'T2 · expires in 4 min', urgent: true }, { label: 'Transfer 0.005 ETH', sub: 'T2 · Pending review', urgent: false }].map((item, i) => (
-              <div key={i} className={`rounded-xl p-3 border ${item.urgent ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-100 dark:border-amber-900/50' : 'bg-slate-50 dark:bg-slate-900 border-slate-100 dark:border-slate-800'}`}>
-                <p className={`text-[11px] font-bold ${item.urgent ? 'text-amber-900 dark:text-amber-300' : 'text-slate-800 dark:text-slate-200'}`}>{item.label}</p>
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{item.sub}</p>
-              </div>
-            ))}
-          </div>
-        </div>
+
         <div>
           <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2.5">Active guardrails</p>
           <div className="rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 p-4 space-y-3">
             <div>
-              <div className="flex justify-between text-[11px] mb-1.5"><span className="text-slate-500 dark:text-slate-400 font-medium">Daily cap used</span><span className="font-bold text-slate-900 dark:text-white">$65.40 / $150</span></div>
-              <div className="h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden"><div className="h-full rounded-full bg-[#84CC16]" style={{ width: '43.6%' }} /></div>
+              <div className="flex justify-between text-[11px] mb-1.5"><span className="text-slate-500 dark:text-slate-400 font-medium">Daily cap used</span><span className="font-bold text-slate-900 dark:text-white">$0.00 / $150</span></div>
+              <div className="h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden"><div className="h-full rounded-full bg-[#84CC16]" style={{ width: '0%' }} /></div>
             </div>
             <div className="flex justify-between text-[11px]"><span className="text-slate-500 dark:text-slate-400 font-medium">Per-tx max</span><span className="font-bold text-slate-900 dark:text-white">$25.00</span></div>
             <div className="flex justify-between text-[11px]"><span className="text-slate-500 dark:text-slate-400 font-medium">Autonomy level</span><span className="font-bold text-[#65A30D] dark:text-lime-400">L2 · Standard</span></div>
-          </div>
-        </div>
-        <div>
-          <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2.5">Recent actions</p>
-          <div className="space-y-1.5">
-            {[{ text: 'Balance checked', time: '2 min ago', tone: 'green' }, { text: 'Policy validated', time: '18 min ago', tone: 'green' }, { text: 'Transfer confirmed', time: '1 hr ago', tone: 'green' }, { text: 'Recipient blocked', time: 'Yesterday', tone: 'red' }].map((item, i) => (
-              <div key={i} className="flex items-center justify-between text-[11px]">
-                <div className="flex items-center gap-2"><span className={`w-1.5 h-1.5 rounded-full shrink-0 ${item.tone === 'green' ? 'bg-[#84CC16]' : 'bg-rose-400'}`} /><span className="text-slate-700 dark:text-slate-300 font-medium">{item.text}</span></div>
-                <span className="text-slate-400 dark:text-slate-500">{item.time}</span>
-              </div>
-            ))}
           </div>
         </div>
       </div>
@@ -285,59 +383,170 @@ function ContextPanel({ width, onResizeStart }: { width: number; onResizeStart: 
   )
 }
 
-const demoMessages: Message[] = [
-  { id: '0', role: 'system', text: 'BambooLeaf Agent connected · Sepolia testnet · Policy active', ts: new Date(Date.now() - 300000) },
-  { id: '1', role: 'user', text: 'Check my wallet balance', ts: new Date(Date.now() - 290000) },
-  { id: '2', role: 'agent', text: "Here's your current guarded wallet balance on Sepolia testnet:", toolCalls: [{ name: 'wallet.getBalance()', status: 'done', detail: '0.72 ETH, 1079.43 USDC' }], cards: [{ kind: 'balance', eth: '0.72 ETH', usdc: '$1,079.43', total: '$2,840.60', change: '+2.4%' } as BalanceCard], ts: new Date(Date.now() - 288000) },
-  { id: '3', role: 'user', text: 'What are my current spending limits?', ts: new Date(Date.now() - 180000) },
-  { id: '4', role: 'agent', text: "Your deterministic policy limits are active. All transactions are validated before signing:", toolCalls: [{ name: 'policy.getLimits()', status: 'done', detail: 'perTx: $25, daily: $150' }], cards: [{ kind: 'policy', perTxCap: '$25.00', dailyCap: '$150.00', usedToday: '$65.40', autonomyLevel: 'L2 · Standard' } as PolicyCard], ts: new Date(Date.now() - 178000) },
-  { id: '5', role: 'user', text: 'Swap 12 USDC to ETH', ts: new Date(Date.now() - 60000) },
-  { id: '6', role: 'agent', text: "This swap exceeds the auto-approve threshold ($10), so it needs your T2 approval:", toolCalls: [{ name: 'policy.validate(swap)', status: 'done', detail: 'T2 required' }, { name: 'swap.quote(12 USDC → ETH)', status: 'done', detail: '1 ETH = $2,490.11' }], cards: [{ kind: 'swap', from: 'USDC', to: 'ETH', amount: '12', rate: '1 ETH = $2,490.11', status: 'proposed' } as SwapCard, { kind: 'approval', description: 'Swap 12 USDC → ETH on Uniswap v3 · Sepolia', amount: '$12.00', expires: 'in 4 min' } as ApprovalCard], ts: new Date(Date.now() - 18000) },
-]
-
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api').replace(/\/+$/, '')
 
-async function getAgentResponse(userText: string): Promise<Message> {
-  const lower = userText.toLowerCase()
+async function getAgentResponse(userText: string, untrusted?: string[]): Promise<Message> {
   const id = crypto.randomUUID()
   try {
-    const res = await fetch(`${apiBaseUrl}/goal`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ goal: userText }), signal: AbortSignal.timeout(6000) })
-    if (res.ok) {
-      const data = await res.json() as { status?: string; txHash?: string; reason?: string }
-      return { id, role: 'agent', text: data.txHash ? `Transaction confirmed! Hash: ${data.txHash}` : data.reason || `Status: ${data.status ?? 'submitted'}`, cards: data.txHash ? [{ kind: 'transaction', status: 'confirmed', type: 'Goal execution', amount: '', to: data.txHash, hash: data.txHash } as TransactionCard] : undefined, ts: new Date() }
+    const payload: { goal: string; untrusted?: string[] } = { goal: userText }
+    if (untrusted && untrusted.length > 0) {
+      payload.untrusted = untrusted
     }
-  } catch { /* fall through */ }
-  await new Promise(r => setTimeout(r, 1000 + Math.random() * 800))
-  if (lower.includes('balance') || lower.includes('wallet')) return { id, role: 'agent', text: "Here's your current guarded wallet balance:", toolCalls: [{ name: 'wallet.getBalance()', status: 'done', detail: '0.72 ETH, 1079.43 USDC' }], cards: [{ kind: 'balance', eth: '0.72 ETH', usdc: '$1,079.43', total: '$2,840.60', change: '+2.4%' } as BalanceCard], ts: new Date() }
-  if (lower.includes('swap') || lower.includes('usdc')) { const amt = userText.match(/\d+\.?\d*/)?.[0] ?? '20'; return { id, role: 'agent', text: `Swap of ${amt} USDC requires T2 approval:`, toolCalls: [{ name: 'policy.validate(swap)', status: 'done', detail: 'T2 required' }, { name: `swap.quote(${amt} USDC → ETH)`, status: 'done', detail: '1 ETH = $2,490.11' }], cards: [{ kind: 'swap', from: 'USDC', to: 'ETH', amount: amt, rate: '1 ETH = $2,490.11', status: 'proposed' } as SwapCard, { kind: 'approval', description: `Swap ${amt} USDC → ETH on Uniswap v3`, amount: `$${amt}.00`, expires: 'in 5 min' } as ApprovalCard], ts: new Date() } }
-  if (lower.includes('send') || lower.includes('transfer')) { const amt = userText.match(/\d+\.?\d*/)?.[0] ?? '0.01'; const blocked = parseFloat(amt) > 0.5; return { id, role: 'agent', text: blocked ? `⚠ Transfer blocked — exceeds per-tx cap ($25.00).` : `Transfer validated and signed successfully.`, toolCalls: [{ name: 'policy.validate(transfer)', status: blocked ? 'failed' : 'done', detail: blocked ? 'Exceeds per-tx cap' : 'All checks passed' }, ...(!blocked ? [{ name: 'signer.sign(tx)', status: 'done' as const, detail: 'Confirmed' }] : [])], cards: [{ kind: 'transaction', status: blocked ? 'blocked' : 'confirmed', type: `Transfer ${amt} ETH`, amount: `${amt} ETH`, to: '0x3C44…93BC', hash: blocked ? undefined : '0x7a3b…f291', reason: blocked ? 'Exceeds per-transaction cap ($25.00)' : undefined } as TransactionCard], ts: new Date() } }
-  if (lower.includes('policy') || lower.includes('limit')) return { id, role: 'agent', text: "Your active deterministic policy limits:", toolCalls: [{ name: 'policy.getLimits()', status: 'done', detail: 'perTx: $25, daily: $150' }], cards: [{ kind: 'policy', perTxCap: '$25.00', dailyCap: '$150.00', usedToday: '$65.40', autonomyLevel: 'L2 · Standard' } as PolicyCard], ts: new Date() }
-  return { id, role: 'agent', text: `I understand: "${userText}". Analyzing against policy limits… (Demo mode — backend not reachable)`, toolCalls: [{ name: 'policy.validate(goal)', status: 'done', detail: 'Checks passed' }], ts: new Date() }
+    const res = await authenticatedFetch(`${apiBaseUrl}/goal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000),
+    })
+
+    const data = await res.json().catch(() => null) as GoalApiResponse | null
+
+    if (data) {
+      if (data.status === 'success' && data.data) {
+        return {
+          id, role: 'agent',
+          text: "Here's your current guarded wallet balance:",
+          toolCalls: [{ name: 'wallet.getBalance()', status: 'done' as const, detail: `${data.data.balanceEth} ETH, ${data.data.balanceUsdc} USDC` }],
+          cards: [{ kind: 'balance', eth: `${data.data.balanceEth} ETH`, usdc: `${data.data.balanceUsdc} USDC`, total: `${data.data.balanceEth} ETH`, change: '+0.00%', chainId: data.data.chainId } as BalanceCard],
+          ts: new Date(),
+        }
+      }
+
+      if (data.status === 'approval_required') {
+        const approvalId = data.approvalId || data.approval?.id
+        return {
+          id, role: 'agent',
+          text: `This transaction requires your manual approval (T2).`,
+          toolCalls: [{ name: 'policy.validate(intent)', status: 'done' as const, detail: 'T2 required' }],
+          cards: [{ 
+            kind: 'approval', 
+            description: `Transaction to ${data.intent?.recipient || 'recipient'}`, 
+            amount: `${data.intent?.amount} ${data.intent?.token}`, 
+            expires: 'in 5 min',
+            approvalId
+          } as ApprovalCard],
+          ts: new Date(),
+        }
+      }
+
+      if (data.status === 'blocked' && data.code) {
+        return {
+          id, role: 'agent',
+          text: `⚠ Blocked: ${data.error || 'The action violates security policy.'}`,
+          toolCalls: [{ name: 'quarantine.inspect()', status: 'failed' as const, detail: data.code }],
+          cards: [{ kind: 'transaction', status: 'blocked', type: 'Quarantine Blocked', amount: '', to: 'Security Firewall', reason: data.error || 'Untrusted content flagged' } as TransactionCard],
+          ts: new Date(),
+        }
+      }
+
+      if (data.status === 'denied') {
+        return {
+          id, role: 'agent',
+          text: `⚠ Policy denied: ${data.reason || 'Transaction violates wallet security policy.'}`,
+          toolCalls: [{ name: 'policy.evaluate(intent)', status: 'failed' as const, detail: 'Policy Denied' }],
+          cards: [{ kind: 'transaction', status: 'blocked', type: data.intent?.action ? `${data.intent.action.toUpperCase()} ${data.intent.amount ?? ''}`.trim() : 'Policy Denied', amount: data.intent?.amount ? `${data.intent.amount} ${data.intent.token}` : '', to: data.intent?.recipient || 'External', reason: data.reason || 'Denied by policy guardrails' } as TransactionCard],
+          ts: new Date(),
+        }
+      }
+
+      if (data.txHash || data.status === 'confirmed' || data.status === 'success') {
+        return {
+          id, role: 'agent',
+          text: `Transaction confirmed on-chain!`,
+          toolCalls: [
+            { name: 'policy.validate()', status: 'done' as const, detail: 'Approved' },
+            { name: 'signer.broadcast()', status: 'done' as const, detail: 'Confirmed' },
+          ],
+          cards: [{ kind: 'transaction', status: 'confirmed', type: data.intent?.action ? `${data.intent.action} ${data.intent.amount || ''} ${data.intent.token || ''}`.trim() : 'Execution confirmed', amount: data.intent?.amount ? `${data.intent.amount} ${data.intent.token}` : '', to: data.intent?.recipient || 'Recipient', hash: data.txHash } as TransactionCard],
+          ts: new Date(),
+        }
+      }
+    }
+  } catch (error) {
+    return {
+      id, role: 'agent',
+      text: `⚠ ${error instanceof Error ? error.message : 'Backend unreachable or request timed out. Please check your server.'}`,
+      toolCalls: [{ name: 'network.request()', status: 'failed' as const, detail: 'Connection failed' }],
+      ts: new Date(),
+    }
+  }
+  
+  return {
+    id, role: 'agent',
+    text: `I couldn't process that request.`,
+    toolCalls: [{ name: 'agent.process()', status: 'failed' as const, detail: 'Unknown response' }],
+    ts: new Date(),
+  }
 }
 
-const quickPrompts = ['Check my balance', 'Swap 20 USDC to ETH', 'Send 0.01 ETH to Mayesha', 'Show policy limits']
+const quickPrompts = ['Check my balance', 'Swap 20 USDC to ETH', 'Send 0.01 ETH to 0xe2463837df0a08d3d1728a0cef444a57a879b1dd', 'Show policy limits']
 
-export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>(demoMessages)
+interface ChatPageProps {
+  userProfile?: UserProfile
+}
+
+export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {}) {
+  const [storedUserProfile] = useState<UserProfile>(() => {
+    if (propProfile) return propProfile
+    try {
+      const saved = localStorage.getItem('bambooleaf_user_profile')
+      if (saved) return JSON.parse(saved)
+    } catch (error) {
+      console.warn('Unable to read saved user profile.', error)
+    }
+    return {
+      name: 'Mayes', handle: 'owner@bambooleaf.eth', email: 'mayes@bambooleaf.eth', walletAddress: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+      role: 'Primary Signer · Workspace Owner', avatarColor: 'from-[#65A30D] to-[#84CC16]', bio: '...', telegram: '@mayes_guard', cardName: 'MAYES · OWNER',
+    }
+  })
+  const userProfile = propProfile || storedUserProfile
+
+  // UPDATED: Save chat to localStorage
+  const [messages, setMessages] = useState<Message[]>(() => {
+    try {
+      const saved = localStorage.getItem('bambooleaf_chat_history')
+      if (saved) {
+        return JSON.parse(saved, (key, value) => {
+          if (key === 'ts') return new Date(value)
+          return value
+        })
+      }
+    } catch (err) {
+      console.error('Failed to load chat history', err)
+    }
+    return [{ id: '0', role: 'system', text: 'BambooLeaf Agent connected · Sepolia testnet · Policy active', ts: new Date() }]
+  })
+
+  // UPDATED: Save messages when they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('bambooleaf_chat_history', JSON.stringify(messages))
+    } catch (err) {
+      console.error('Failed to save chat history', err)
+    }
+  }, [messages])
+
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [showAttachment, setShowAttachment] = useState(false)
+  const [attachmentText, setAttachmentText] = useState('')
+  const [attachmentFileName, setAttachmentFileName] = useState('')
+  const [attachmentError, setAttachmentError] = useState('')
   const [contextPanelWidth, setContextPanelWidth] = useState(280)
   const contextResizing = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isTyping])
 
-  // Right panel resize handler
   const handleContextResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     contextResizing.current = true
     const startX = e.clientX
     const startWidth = contextPanelWidth
-
     const onMove = (ev: MouseEvent) => {
       if (!contextResizing.current) return
-      // Dragging left makes the panel wider
       const delta = startX - ev.clientX
       const newWidth = Math.max(200, Math.min(450, startWidth + delta))
       setContextPanelWidth(newWidth)
@@ -357,11 +566,28 @@ export default function ChatPage() {
 
   async function send(text: string) {
     const trimmed = text.trim()
+    const untrustedTrimmed = attachmentText.trim()
     if (!trimmed || isTyping) return
-    setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'user', text: trimmed, ts: new Date() }])
+
+    const attachmentContent = attachmentFileName
+      ? `Attached file: ${attachmentFileName}\n${untrustedTrimmed}`
+      : untrustedTrimmed
+    const untrustedList = attachmentContent ? [attachmentContent] : undefined
+
+    setMessages(prev => [...prev, {
+      id: crypto.randomUUID(),
+      role: 'user',
+      text: trimmed,
+      untrusted: untrustedList,
+      ts: new Date(),
+    }])
     setInput('')
+    setAttachmentText('')
+    setAttachmentFileName('')
+    setAttachmentError('')
+    setShowAttachment(false)
     setIsTyping(true)
-    const agentMsg = await getAgentResponse(trimmed)
+    const agentMsg = await getAgentResponse(trimmed, untrustedList)
     setIsTyping(false)
     setMessages(prev => [...prev, agentMsg])
   }
@@ -369,24 +595,101 @@ export default function ChatPage() {
   function handleSubmit(e: FormEvent) { e.preventDefault(); send(input) }
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input) } }
 
+  async function handleAttachmentFile(file?: File) {
+    if (!file) return
+    if (file.size > 16 * 1024) {
+      setAttachmentError('Choose a text file no larger than 16 KB, or paste the relevant invoice text.')
+      return
+    }
+    if (!/\.(txt|md|csv|json)$/i.test(file.name)) {
+      setAttachmentError('Supported files: .txt, .md, .csv, and .json. For PDFs, copy and paste the invoice text.')
+      return
+    }
+    try {
+      const content = await file.text()
+      setAttachmentText(content)
+      setAttachmentFileName(file.name)
+      setAttachmentError('')
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? `Unable to read file: ${error.message}` : 'Unable to read selected file.')
+    }
+  }
+
   return (
     <div className="flex h-full overflow-hidden bg-[#FBFBFC] dark:bg-[#090e1a] transition-colors">
       <div className="flex flex-col flex-1 h-full min-w-0">
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 space-y-5">
-          {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
+          {messages.map(msg => <MessageBubble key={msg.id} msg={msg} userProfile={userProfile} />)}
           {isTyping && <TypingIndicator />}
           <div ref={bottomRef} />
         </div>
         <div className="border-t border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0c1220] px-4 sm:px-6 py-4 space-y-3 transition-colors">
-          <div className="flex flex-wrap gap-2">
-            {quickPrompts.map(p => (
-              <button key={p} onClick={() => send(p)} disabled={isTyping} className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-full px-3 py-1.5 hover:border-[#84CC16] hover:text-[#65A30D] dark:hover:text-lime-400 transition disabled:opacity-50">{p}</button>
-            ))}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
+              {quickPrompts.map(p => (
+                <button key={p} onClick={() => send(p)} disabled={isTyping} className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-full px-3 py-1.5 hover:border-[#84CC16] hover:text-[#65A30D] dark:hover:text-lime-400 transition disabled:opacity-50">{p}</button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setShowAttachment((prev) => !prev)
+                setAttachmentError('')
+              }}
+              className={`inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-3 py-1.5 transition ${showAttachment ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 border border-dashed border-slate-300 dark:border-slate-700'}`}
+            >
+              <Icon d={Icons.paperclip} size={12} />
+              {showAttachment ? 'Close memo' : 'Attach invoice / memo'}
+            </button>
           </div>
+
+          {showAttachment && (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-50/60 dark:bg-amber-950/20 p-3.5 space-y-2 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+                  <Icon d={Icons.shield} size={13} className="text-amber-600 dark:text-amber-400" />
+                  Untrusted Content · Inspected by Quarantine
+                </span>
+                <button type="button" onClick={() => { setShowAttachment(false); setAttachmentText(''); setAttachmentFileName(''); setAttachmentError('') }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold">
+                  ✕ Cancel
+                </button>
+              </div>
+              <textarea
+                value={attachmentText}
+                onChange={e => { setAttachmentText(e.target.value); setAttachmentFileName('') }}
+                placeholder="Paste invoice text, memo, or external payment details to be inspected before planning..."
+                rows={2}
+                maxLength={6000}
+                className="w-full resize-none rounded-xl border border-amber-200/80 dark:border-amber-900/60 bg-white dark:bg-slate-900 p-2.5 text-xs font-mono text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  ref={attachmentInputRef}
+                  type="file"
+                  accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+                  className="hidden"
+                  onChange={(event) => { void handleAttachmentFile(event.currentTarget.files?.[0]); event.currentTarget.value = '' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => attachmentInputRef.current?.click()}
+                  className="rounded-full border border-amber-300 px-3 py-1.5 text-[10px] font-bold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950/60"
+                >
+                  Choose text file
+                </button>
+                {attachmentFileName && <span className="max-w-full truncate text-[10px] font-semibold text-amber-900 dark:text-amber-300">{attachmentFileName}</span>}
+              </div>
+              {attachmentError && <p role="alert" className="text-[10px] font-semibold text-rose-700 dark:text-rose-300">{attachmentError}</p>}
+              <p className="text-[10px] text-amber-800/80 dark:text-amber-400/80 font-medium">
+                File text and pasted content are untrusted and inspected by quarantine before planning. Maximum file size: 16 KB.
+              </p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="flex items-end gap-3">
             <div className="flex-1 relative">
               <textarea ref={inputRef} id="chat-input" value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
-                placeholder="Describe a goal… e.g. 'Swap 20 USDC to ETH' or 'Check my balance'"
+                placeholder="Describe a goal… e.g. 'Swap 20 USDC to ETH' or 'Pay invoice'"
                 rows={1} disabled={isTyping}
                 className="w-full resize-none rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 py-3 pr-10 text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-[#84CC16] focus:bg-white dark:focus:bg-slate-900/90 focus:ring-4 focus:ring-lime-500/10 outline-none transition disabled:opacity-60 leading-6"
                 style={{ minHeight: '48px', maxHeight: '120px' }}
@@ -405,7 +708,7 @@ export default function ChatPage() {
           </p>
         </div>
       </div>
-      <ContextPanel width={contextPanelWidth} onResizeStart={handleContextResizeStart} />
+      <ContextPanel width={contextPanelWidth} onResizeStart={handleContextResizeStart} userProfile={userProfile} />
     </div>
   )
 }

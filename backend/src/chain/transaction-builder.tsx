@@ -1,4 +1,4 @@
-import { getAddress, parseEther, parseUnits, Interface } from 'ethers'
+import { getAddress, parseEther, parseUnits, Interface, Contract } from 'ethers'
 import { getToken, isNativeToken } from './token-registry.tsx'
 
 const ERC20_ABI = [
@@ -8,9 +8,18 @@ const ERC20_ABI = [
 
 const erc20Interface = new Interface(ERC20_ABI)
 const approvalInterface = new Interface(['function approve(address spender, uint256 amount) returns (bool)'])
-const routerInterface = new Interface([
+export const routerInterface = new Interface([
   'function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) returns (uint256[] amounts)',
+  'function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)',
 ])
+
+// 1. Define the standard TxRequest type for the Guard Pipeline
+export type TxRequest = {
+  to: string
+  value: bigint
+  data: string
+  description: string
+}
 
 type BuiltTransaction = {
   to: string
@@ -30,6 +39,7 @@ type BuiltSwap = {
   swap: BuiltTransaction
 }
 
+// 2. Build Swap (Existing)
 function buildSwapTransactions(intent: any, {
   routerAddress,
   recipient,
@@ -52,7 +62,7 @@ function buildSwapTransactions(intent: any, {
   if (!Number.isInteger(maxSlippageBps) || maxSlippageBps < 0 || maxSlippageBps > 500) {
     throw new Error('Slippage must be between 0 and 500 basis points')
   }
-  if (quotedAmountOut <= 0n || !Number.isSafeInteger(deadline) || deadline <= Math.floor(Date.now() / 1000)) {
+  if (quotedAmountOut < 0n || !Number.isSafeInteger(deadline) || deadline <= Math.floor(Date.now() / 1000)) {
     throw new Error('Swap quote or deadline is invalid')
   }
 
@@ -63,8 +73,8 @@ function buildSwapTransactions(intent: any, {
   }
   const amountIn = parseUnits(intent.from.amount, tokenIn.decimals)
   const minAmountOut = quotedAmountOut * BigInt(10_000 - maxSlippageBps) / 10_000n
-  if (amountIn <= 0n || minAmountOut <= 0n) {
-    throw new Error('Swap input and minimum output must be greater than zero')
+  if (amountIn <= 0n || minAmountOut < 0n) {
+    throw new Error('Swap input amount must be greater than zero')
   }
 
   const router = getAddress(routerAddress)
@@ -92,6 +102,7 @@ function buildSwapTransactions(intent: any, {
   }
 }
 
+// 3. Build Approvals & Transfers (Existing)
 function buildErc20Approval(tokenAddress: string, spender: string, amount: bigint): BuiltTransaction {
   if (amount < 0n) throw new Error('Approval amount cannot be negative')
   return {
@@ -124,7 +135,6 @@ function buildErc20Transfer(intent: any): BuiltTransaction {
 
   const recipient = getAddress(intent.recipient)
   const amount = parseUnits(intent.from.amount, token.decimals)
-
   const data = erc20Interface.encodeFunctionData('transfer', [recipient, amount])
 
   return {
@@ -144,4 +154,43 @@ function buildTransaction(intent: any): BuiltTransaction {
   throw new Error(`Unsupported action: ${intent.action}`)
 }
 
-export { buildNativeTransfer, buildErc20Approval, buildErc20Transfer, buildSwapTransactions, buildTransaction, routerInterface }
+// 4. NEW: Main function for Guard Pipeline (P1 will call this)
+export async function buildTxRequests(intent: any, ctx: any): Promise<TxRequest[]> {
+  if (intent.action === 'transfer') {
+    if (isNativeToken(intent.from.token)) {
+      const tx = buildNativeTransfer(intent)
+      return [{ ...tx, description: `Transfer ${intent.from.amount} ETH` }]
+    }
+    const tx = buildErc20Transfer(intent)
+    return [{ ...tx, description: `Transfer ${intent.from.amount} ${intent.from.token}` }]
+  }
+
+  if (intent.action === 'swap') {
+    const { provider } = ctx
+    const router = ctx.policy.swapRouterAddress
+    const tokenIn = getToken(intent.from.token, intent.chainId)
+    const tokenOut = getToken(intent.to.token, intent.chainId)
+    
+    // Fetch live quote from Uniswap
+    const routerContract = new Contract(router, routerInterface, provider)
+    const amountIn = parseUnits(intent.from.amount, tokenIn.decimals)
+    const amounts = await routerContract.getAmountsOut(amountIn, [tokenIn.address, tokenOut.address])
+    const quotedAmountOut = BigInt(amounts[1])
+
+    const { approval, swap } = buildSwapTransactions(intent, {
+      routerAddress: router,
+      recipient: ctx.signerAddress,
+      quotedAmountOut,
+      maxSlippageBps: intent.maxSlippageBps
+    })
+
+    return [
+      { ...approval, description: `Approve ${intent.from.amount} ${intent.from.token}` },
+      { ...swap, description: `Swap ${intent.from.amount} ${intent.from.token} to ${intent.to.token}` }
+    ]
+  }
+
+  throw new Error(`Unsupported action for tx builder: ${intent.action}`)
+}
+
+export { buildNativeTransfer, buildErc20Approval, buildErc20Transfer, buildSwapTransactions, buildTransaction }

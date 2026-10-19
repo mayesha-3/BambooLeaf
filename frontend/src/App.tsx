@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import type { Page, AuditEntry, AuditState } from './types'
+import type { Page, AuditEntry, AuditState, UserProfile } from './types'
 import type { IconName } from './types'
 import { apiBaseUrl } from './config/api'
 import Icon from './components/ui/Icon'
@@ -12,7 +12,15 @@ import AutonomyPage from './pages/AutonomyPage'
 import WalletPage from './pages/WalletPage'
 import ArenaPage from './pages/ArenaPage'
 import SettingsPage from './pages/SettingsPage'
+import TransactPage from './pages/TransactPage'
 import ChatPage from './features/chat/ChatPage'
+import ComplianceConsole from './pages/ComplianceConsole'
+import PaymentsPage from './pages/PaymentsPage'
+import ProfileDropdown from './components/ProfileDropdown'
+import LiveMarketTicker from './features/market/LiveMarketTicker'
+import { authenticatedFetch } from './lib/device-session'
+
+const validPages: Page[] = ['overview', 'chat', 'activity', 'approvals', 'policy', 'autonomy', 'wallet', 'arena', 'compliance', 'payments', 'settings', 'transact']
 
 const navGroups: { label: string; items: { id: Page; label: string; icon: IconName; count?: string; isChat?: boolean }[] }[] = [
   {
@@ -25,8 +33,9 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: IconNa
     label: 'WORKSPACE',
     items: [
       { id: 'overview', label: 'Overview', icon: 'grid' },
+      { id: 'transact', label: 'Transact', icon: 'send' },
       { id: 'activity', label: 'Activity log', icon: 'activity' },
-      { id: 'approvals', label: 'Approvals', icon: 'check', count: '2' },
+      { id: 'approvals', label: 'Approvals', icon: 'check' },
     ],
   },
   {
@@ -38,13 +47,54 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: IconNa
     ],
   },
   {
+    label: 'COMPLIANCE',
+    items: [
+      { id: 'compliance', label: 'Compliance Console', icon: 'layers' },
+      { id: 'payments', label: 'Supplier payments', icon: 'wallet' },
+    ],
+  },
+  {
     label: 'PLAYGROUND',
     items: [{ id: 'arena', label: 'Attack Arena', icon: 'target' }],
   },
 ]
 
+function getInitialPage(): Page {
+  if (typeof window !== 'undefined') {
+    const hash = window.location.hash.replace(/^#\/?/, '').trim() as Page
+    if (validPages.includes(hash)) return hash
+    try {
+      const saved = localStorage.getItem('bambooleaf_current_page') as Page
+      if (saved && validPages.includes(saved)) {
+        window.location.hash = `/${saved}`
+        return saved
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return 'chat'
+}
+
 export function App() {
-  const [page, setPage] = useState<Page>('chat')
+  const [page, setPage] = useState<Page>(getInitialPage)
+
+  // Listen to browser back/forward buttons or direct hash change
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace(/^#\/?/, '').trim() as Page
+      if (validPages.includes(hash)) {
+        setPage(hash)
+        try {
+          localStorage.setItem('bambooleaf_current_page', hash)
+        } catch {
+          // ignore
+        }
+      }
+    }
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showGoalModal, setShowGoalModal] = useState(false)
@@ -80,6 +130,42 @@ export function App() {
       // ignore
     }
   }, [darkMode])
+
+  // User Profile state with local persistence
+  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
+    try {
+      const saved = localStorage.getItem('bambooleaf_user_profile')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (!parsed.cardName) parsed.cardName = parsed.name ? `${parsed.name.toUpperCase()} · OWNER` : 'MAYES · OWNER'
+        return parsed
+      }
+    } catch {
+      // fallback
+    }
+    return {
+      name: 'Mayes',
+      handle: 'owner@bambooleaf.eth',
+      email: 'mayes@bambooleaf.eth',
+      walletAddress: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+      role: 'Primary Signer · Workspace Owner',
+      avatarColor: 'from-[#65A30D] to-[#84CC16]',
+      bio: 'Guarded agent workspace administrator on Sepolia testnet.',
+      telegram: '@mayes_guard',
+      cardName: 'MAYES · OWNER',
+    }
+  })
+
+  const [showProfileMenu, setShowProfileMenu] = useState(false)
+
+  const handleUpdateProfile = (updated: UserProfile) => {
+    setUserProfile(updated)
+    try {
+      localStorage.setItem('bambooleaf_user_profile', JSON.stringify(updated))
+    } catch {
+      // ignore
+    }
+  }
 
   // Left sidebar resize handler
   const handleSidebarResizeStart = useCallback((e: ReactMouseEvent) => {
@@ -123,10 +209,20 @@ export function App() {
 
   const refreshAudit = useCallback(async () => {
     setAuditState((current) => ({ ...current, loading: true, error: '' }))
+    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    if (!token) {
+      setAuditState((current) => ({
+        ...current,
+        valid: null,
+        error: 'Sign in with an authorized owner or auditor wallet to view audit records.',
+        loading: false,
+      }))
+      return
+    }
     try {
       const [eventsResponse, verifyResponse] = await Promise.all([
-        fetch(`${apiBaseUrl}/audit?limit=50`),
-        fetch(`${apiBaseUrl}/audit/verify`),
+        authenticatedFetch(`${apiBaseUrl}/audit?limit=50`),
+        authenticatedFetch(`${apiBaseUrl}/audit/verify`),
       ])
       const eventPayload = (await eventsResponse.json()) as { entries?: AuditEntry[]; error?: string }
       const verifyPayload = (await verifyResponse.json()) as { valid?: boolean; checked?: number; error?: string }
@@ -151,11 +247,12 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    if (page !== 'overview' && page !== 'activity' && page !== 'approvals') return
     const timer = window.setTimeout(() => {
       void refreshAudit()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [refreshAudit])
+  }, [page, refreshAudit])
 
   // Global cmd+k listener
   useEffect(() => {
@@ -171,6 +268,12 @@ export function App() {
 
   const navigate = (nextPage: Page) => {
     setPage(nextPage)
+    if (window.location.hash !== `#/${nextPage}`) window.location.hash = `/${nextPage}`
+    try {
+      localStorage.setItem('bambooleaf_current_page', nextPage)
+    } catch {
+      // ignore
+    }
     setMobileNavOpen(false)
   }
 
@@ -306,8 +409,14 @@ export function App() {
                           </span>
                         )}
                       </div>
-                      {item.count && !sidebarCollapsed && (
-                        <span className="bg-black dark:bg-lime-400 dark:text-slate-950 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
+                      {item.count !== undefined && !sidebarCollapsed && (
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 transition-all duration-200 ${
+                            item.count === '0'
+                              ? 'bg-slate-200/70 dark:bg-slate-800/80 text-slate-400 dark:text-slate-500'
+                              : 'bg-black dark:bg-lime-400 dark:text-slate-950 text-white shadow-sm'
+                          }`}
+                        >
                           {item.count}
                         </span>
                       )}
@@ -457,18 +566,33 @@ export function App() {
               <Icon name="settings" size={17} />
             </button>
 
-            {/* User Profile Chip (Mayes / Owner Workspace) */}
-            <div
-              onClick={() => navigate('settings')}
-              className="hidden md:flex items-center gap-3 pl-1 pr-2 py-1 rounded-full hover:bg-slate-100/70 dark:hover:bg-slate-800/70 cursor-pointer transition select-none"
-            >
-              <div className="w-9 h-9 rounded-full bg-lime-100 dark:bg-lime-950/60 text-[#65A30D] dark:text-lime-400 font-extrabold flex items-center justify-center shadow-sm">
-                M
-              </div>
-              <div className="text-left leading-tight">
-                <p className="text-xs font-bold text-slate-900 dark:text-slate-100">Mayes</p>
-                <p className="text-[10px] text-slate-400">owner@bambooleaf.eth</p>
-              </div>
+            {/* User Profile Chip + Dropdown (Mayes / Owner Workspace) */}
+            <div className="relative">
+              <button
+                onClick={() => setShowProfileMenu((prev) => !prev)}
+                className="flex items-center gap-2 md:gap-3 pl-1 pr-1.5 md:pr-2.5 py-1 rounded-full hover:bg-slate-100/70 dark:hover:bg-slate-800/70 cursor-pointer transition select-none border border-transparent hover:border-slate-200/80 dark:hover:border-slate-800 focus:outline-none"
+                aria-label="User profile menu"
+                aria-expanded={showProfileMenu}
+              >
+                <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${userProfile.avatarColor} text-white font-extrabold flex items-center justify-center shadow-sm text-sm`}>
+                  {userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'M'}
+                </div>
+                <div className="hidden sm:block text-left leading-tight">
+                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{userProfile.name}</p>
+                  <p className="text-[10px] text-slate-400">{userProfile.handle}</p>
+                </div>
+                <Icon name="chevronDown" size={12} className={`text-slate-400 hidden sm:block transition-transform duration-200 ${showProfileMenu ? 'rotate-180' : ''}`} />
+              </button>
+
+              <ProfileDropdown
+                user={userProfile}
+                isOpen={showProfileMenu}
+                onClose={() => setShowProfileMenu(false)}
+                onNavigate={(dest) => {
+                  setShowProfileMenu(false)
+                  navigate(dest)
+                }}
+              />
             </div>
 
             {/* + Plan goal Button */}
@@ -484,11 +608,14 @@ export function App() {
 
         </header>
 
+        {/* Global Real-Time Market Ticker Bar */}
+        <LiveMarketTicker />
+
         {/* Main Content Body with smooth page transitions */}
         <div key={page} className="flex-1 flex flex-col h-full overflow-hidden animate-page-fade">
           {page === 'chat' ? (
             <div className="flex-1 overflow-hidden">
-              <ChatPage />
+              <ChatPage userProfile={userProfile} />
             </div>
           ) : (
             <main className="p-5 sm:p-7 lg:p-8 flex-1 overflow-y-auto">
@@ -496,16 +623,24 @@ export function App() {
                 <OverviewPage
                   onNavigate={navigate}
                   auditState={auditState}
-                  onOpenGoalModal={() => setShowGoalModal(true)}
+                  userProfile={userProfile}
                 />
               )}
               {page === 'activity' && <ActivityPage auditState={auditState} refreshAudit={refreshAudit} />}
               {page === 'approvals' && <ApprovalsPage />}
               {page === 'policy' && <PolicyPage />}
               {page === 'autonomy' && <AutonomyPage />}
-              {page === 'wallet' && <WalletPage />}
+              {page === 'wallet' && <WalletPage userProfile={userProfile} onNavigate={navigate} />}
               {page === 'arena' && <ArenaPage />}
-              {page === 'settings' && <SettingsPage />}
+              {page === 'compliance' && <ComplianceConsole />}
+              {page === 'payments' && <PaymentsPage />}
+              {page === 'transact' && <TransactPage onNavigate={navigate} />}
+              {page === 'settings' && (
+                <SettingsPage
+                  userProfile={userProfile}
+                  onUpdateProfile={handleUpdateProfile}
+                />
+              )}
             </main>
           )}
         </div>
@@ -558,12 +693,14 @@ export function App() {
               {[
                 { name: '⚡ Agent Chat — Talk to BambooLeaf', p: 'chat' as Page, keywords: 'chat agent talk bamboo' },
                 { name: 'Overview & Guarded Balance', p: 'overview' as Page, keywords: 'overview dashboard balance home' },
+                { name: '💸 Transact — Manual Send & Swap', p: 'transact' as Page, keywords: 'transact send swap manual transfer' },
                 { name: 'Activity Log & Chain Hashes', p: 'activity' as Page, keywords: 'activity log audit chain hash history' },
                 { name: 'Pending Approvals Queue', p: 'approvals' as Page, keywords: 'approvals pending review queue' },
                 { name: 'Policy & Enforced Limits', p: 'policy' as Page, keywords: 'policy limits cap rules spending' },
                 { name: 'Autonomy & Permission Levels', p: 'autonomy' as Page, keywords: 'autonomy level permission trust' },
                 { name: 'Sepolia Testnet Wallet', p: 'wallet' as Page, keywords: 'wallet eth usdc sepolia testnet crypto' },
                 { name: 'Attack Arena Sandbox', p: 'arena' as Page, keywords: 'attack arena sandbox test security' },
+                { name: 'Read-only Compliance Console', p: 'compliance' as Page, keywords: 'compliance auditor audit export verify autonomy policy history' },
                 { name: 'Settings & Security Defaults', p: 'settings' as Page, keywords: 'settings config security preferences' },
               ]
                 .filter((item) => {
@@ -594,6 +731,7 @@ export function App() {
                 { name: 'Autonomy & Permission Levels', p: 'autonomy' as Page, keywords: 'autonomy level permission trust' },
                 { name: 'Sepolia Testnet Wallet', p: 'wallet' as Page, keywords: 'wallet eth usdc sepolia testnet crypto' },
                 { name: 'Attack Arena Sandbox', p: 'arena' as Page, keywords: 'attack arena sandbox test security' },
+                { name: 'Read-only Compliance Console', p: 'compliance' as Page, keywords: 'compliance auditor audit export verify autonomy policy history' },
                 { name: 'Settings & Security Defaults', p: 'settings' as Page, keywords: 'settings config security preferences' },
               ].filter((item) => {
                 const q = searchQuery.toLowerCase()

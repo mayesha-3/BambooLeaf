@@ -2,16 +2,58 @@ import { Contract, JsonRpcProvider, Wallet, parseEther, parseUnits } from 'ether
 import { verifyGuardAuthorization } from '../guard/guard-auth.tsx'
 import { buildErc20Approval, buildNativeTransfer, routerInterface } from '../chain/transaction-builder.tsx'
 import { getToken } from '../chain/token-registry.tsx'
-import { readPolicyConfig } from '../guard/policy-engine.tsx'
+import { evaluateNativeTransfer, readPolicyConfig } from '../guard/policy-engine.tsx'
+import { routeTier } from '../guard/tier-router.tsx'
 import { simulateShadowFork } from '../chain/simulator.tsx'
 import { checkIntentOutcome } from '../guard/intent-outcome-checker.tsx'
-import { transactionDigest } from './approval-digest.tsx'
-import { requireKillSwitchOff } from '../guard/autonomy-manager.tsx'
+import { transactionDigest, verifyTransactionDigest } from './approval-digest.tsx'
+import { getLevel, requireKillSwitchOff } from '../guard/autonomy-manager.tsx'
 import { nextNonce, resetNonceCache } from './nonce-manager.tsx'
+import { getDatabase } from '../db/connection.tsx'
+import { policyWithVerifiedSupplierRecipients } from '../db/repositories/suppliers.repository.tsx'
 
 let provider
 let wallet
 let sendQueue = Promise.resolve()
+
+function assertNativeAutoExecutable(intent, policy, hasHumanApproval = false) {
+  const decision = evaluateNativeTransfer(intent, policy)
+  if (!decision.allowed) {
+    throw new Error(`Signer re-verification rejected transfer: ${decision.reason}`)
+  }
+  const tier = routeTier({
+    intent,
+    allowedRecipients: policy.allowedRecipients,
+    allowedContracts: policy.allowedContracts,
+    maxPerTxWei: policy.maxPerTxWei,
+    valueWei: BigInt(decision.valueWei),
+    riskScore: 0,
+    forbiddenPatterns: [],
+    autonomyLevel: getLevel(),
+  })
+  if (tier.tier !== 'T1' && !(tier.tier === 'T2' && hasHumanApproval)) {
+    throw new Error(`Signer re-verification requires ${tier.tier}: ${tier.reasons.join('; ')}`)
+  }
+  return tier
+}
+
+function assertSwapAutoExecutable(intent, swap, policy) {
+  const cap = parseUnits(policy.maxSwapInputAmount, swap.tokenIn.decimals)
+  const tier = routeTier({
+    intent,
+    allowedRecipients: policy.allowedRecipients,
+    allowedContracts: new Set([...policy.allowedContracts, ...policy.allowedSwapRouters]),
+    targetContract: swap.router,
+    maxPerTxWei: cap,
+    valueWei: swap.amountIn,
+    riskScore: 0,
+    forbiddenPatterns: [],
+    autonomyLevel: getLevel(),
+  })
+  if (tier.tier !== 'T1') {
+    throw new Error(`Signer re-verification requires ${tier.tier}: ${tier.reasons.join('; ')}`)
+  }
+}
 
 function getSigner() {
   if (!process.env.AGENT_KEY) {
@@ -107,7 +149,7 @@ async function getSwapApprovalTransactions(provider, signerAddress, swap) {
 
 async function simulateAuthorizedSwap(intent, authorization) {
   requireKillSwitchOff()
-  const forkUrl = process.env.SHADOW_FORK_RPC_URL
+  const forkUrl = process.env.SHADOW_RPC_URL
   if (!forkUrl) throw new Error('SHADOW_FORK_RPC_URL must point to a local Anvil fork before swaps can execute')
   const signerAddress = getSignerAddress()
   const config = readPolicyConfig()
@@ -160,9 +202,10 @@ async function simulateAuthorizedSwap(intent, authorization) {
   }
 }
 
-function sendAuthorizedNativeTransfer(intent, authorization) {
+function sendAuthorizedNativeTransfer(intent, authorization, { onBroadcast } = {}) {
   requireKillSwitchOff()
   const operation = sendQueue.then(async () => {
+    requireKillSwitchOff()
     const tx = buildNativeTransfer(intent)
     const authPayload = {
       chainId: intent.chainId,
@@ -180,8 +223,9 @@ function sendAuthorizedNativeTransfer(intent, authorization) {
     if (chainId !== Number(process.env.CHAIN_ID || 31337) || chainId !== intent.chainId) {
       throw new Error('Connected chain ID does not match the configured policy chain')
     }
+    const policy = await policyWithVerifiedSupplierRecipients(getDatabase(), readPolicyConfig())
+    const tier = assertNativeAutoExecutable(intent, policy, typeof authorization.approvedDigest === 'string')
 
-    // Use Nonce Manager to avoid duplicate nonces
     const nonce = await nextNonce(rpc, signer)
     const expiresAt = authorization.expiresAt
     const digest = transactionDigest({
@@ -192,18 +236,58 @@ function sendAuthorizedNativeTransfer(intent, authorization) {
       nonce,
       expiresAt,
     })
+
+    // --- Digest Verify check ---
+    if (tier.tier === 'T2' && !authorization.approvedDigest) {
+      throw new Error('Signer re-verification requires a human-approved transaction digest')
+    }
+    if (authorization.approvedDigest) {
+      const isValid = verifyTransactionDigest(authorization.approvedDigest, {
+        chainId, to: tx.to, value: tx.value, data: tx.data, nonce, expiresAt
+      })
+      if (!isValid) {
+        throw new Error('Security Alert: Transaction digest mismatch! Possible tampering detected.')
+      }
+    }
+    // ---------------------------------
+
     const balance = await rpc.getBalance(signer.address)
     const maxBalance = process.env.MAX_AGENT_BALANCE
     if (maxBalance && balance > parseEther(maxBalance)) {
       throw new Error('Signer balance exceeds the configured hard balance ceiling')
     }
 
+    requireKillSwitchOff()
+    if (!verifyGuardAuthorization(authorization, authPayload)) {
+      throw new Error('Guard authorization expired or changed before signing')
+    }
+    if (Number((await rpc.getNetwork()).chainId) !== chainId) {
+      throw new Error('Connected chain changed before signing')
+    }
+    const finalTier = assertNativeAutoExecutable(
+      intent,
+      await policyWithVerifiedSupplierRecipients(getDatabase(), readPolicyConfig()),
+      typeof authorization.approvedDigest === 'string',
+    )
+    if (finalTier.tier === 'T2' && !authorization.approvedDigest) {
+      throw new Error('Signer re-verification requires a human-approved transaction digest')
+    }
+    if (Number(await rpc.getTransactionCount(signer.address, 'pending')) !== nonce) {
+      throw new Error('Signer nonce changed after approval; transaction must be reviewed again')
+    }
     const response = await signer.sendTransaction({
       ...tx,
       chainId,
       nonce,
       gasLimit: 21000,
     })
+    if (onBroadcast) {
+      try {
+        await onBroadcast(response.hash)
+      } catch (error) {
+        console.error('Failed to persist broadcast transaction details.', error)
+      }
+    }
     const receipt = await response.wait()
     if (!receipt || receipt.status !== 1) {
       throw new Error('Transaction was not confirmed successfully')
@@ -211,7 +295,6 @@ function sendAuthorizedNativeTransfer(intent, authorization) {
     return { txHash: receipt.hash, status: 'confirmed', digest }
   })
 
-  // If the operation fails, reset the nonce cache
   operation.catch(() => {
     resetNonceCache()
   })
@@ -222,12 +305,14 @@ function sendAuthorizedNativeTransfer(intent, authorization) {
 function sendAuthorizedSwap(intent, authorization) {
   requireKillSwitchOff()
   const operation = sendQueue.then(async () => {
+    requireKillSwitchOff()
     const { provider: rpc, wallet: signer } = getSigner()
     const config = readPolicyConfig()
     const network = await rpc.getNetwork()
     const chainId = Number(network.chainId)
     const swap = validateAuthorizedSwap(intent, authorization, signer.address, chainId, config)
     const { router, tokenIn, amountIn, minAmountOut } = swap
+    assertSwapAutoExecutable(intent, swap, config)
 
     const allowanceContract = new Contract(
       tokenIn.address,
@@ -236,18 +321,40 @@ function sendAuthorizedSwap(intent, authorization) {
     )
     let allowance = BigInt(await allowanceContract.allowance(signer.address, router))
     const digests = []
+    const approvalTxHashes = []
+    
     const sendApproval = async ({ to, value, data }) => {
+      requireKillSwitchOff()
+      const currentConfig = readPolicyConfig()
+      const currentSwap = validateAuthorizedSwap(intent, authorization, signer.address, Number((await rpc.getNetwork()).chainId), currentConfig)
+      assertSwapAutoExecutable(intent, currentSwap, currentConfig)
       const nonce = await nextNonce(rpc, signer)
       const digest = transactionDigest({
         chainId, to, value, data, nonce, expiresAt: authorization.expiresAt,
       })
+
+      // ---Digest Verify check(Approval) ---
+      if (authorization.approvedApprovalDigest) {
+         const isValid = verifyTransactionDigest(authorization.approvedApprovalDigest, {
+           chainId, to, value, data, nonce, expiresAt: authorization.expiresAt
+         })
+         if (!isValid) throw new Error('Security Alert: Approval digest mismatch!')
+      }
+      // -----------------------------------------
+
+      if (Number(await rpc.getTransactionCount(signer.address, 'pending')) !== nonce) {
+        throw new Error('Signer nonce changed before ERC-20 approval could be sent')
+      }
+      requireKillSwitchOff()
       const response = await signer.sendTransaction({
         to, value, data, chainId, nonce,
       })
       const receipt = await response.wait()
       if (!receipt || receipt.status !== 1) throw new Error('ERC-20 approval was not confirmed')
       digests.push(digest)
+      approvalTxHashes.push(receipt.hash)
     }
+    
     if (allowance < amountIn) {
       for (const approval of await getSwapApprovalTransactions(rpc, signer.address, swap)) {
         await sendApproval(approval)
@@ -265,6 +372,38 @@ function sendAuthorizedSwap(intent, authorization) {
       nonce,
       expiresAt: authorization.expiresAt,
     })
+
+    // --- Digest Verify check---
+    if (authorization.approvedDigest) {
+      const isValid = verifyTransactionDigest(authorization.approvedDigest, {
+        chainId, to: router, value: 0n, data: authorization.transactionData, nonce, expiresAt: authorization.expiresAt
+      })
+      if (!isValid) {
+        throw new Error('Security Alert: Swap digest mismatch! Possible tampering detected.')
+      }
+    }
+    // -----------------------------------------
+
+    requireKillSwitchOff()
+    const finalConfig = readPolicyConfig()
+    const finalSwap = validateAuthorizedSwap(intent, authorization, signer.address, Number((await rpc.getNetwork()).chainId), finalConfig)
+    assertSwapAutoExecutable(intent, finalSwap, finalConfig)
+    if (finalSwap.router.toLowerCase() !== router.toLowerCase() ||
+        finalSwap.amountIn !== amountIn ||
+        finalSwap.minAmountOut !== minAmountOut ||
+        !verifyGuardAuthorization(authorization, {
+          chainId,
+          intentId: intent.intentId,
+          recipient: signer.address,
+          valueWei: '0',
+          transactionTo: router,
+          transactionData: authorization.transactionData,
+        })) {
+      throw new Error('Swap authorization changed before signing')
+    }
+    if (Number(await rpc.getTransactionCount(signer.address, 'pending')) !== nonce) {
+      throw new Error('Signer nonce changed after swap approval; transaction must be reviewed again')
+    }
     const response = await signer.sendTransaction({
       to: router,
       value: 0n,
@@ -279,6 +418,7 @@ function sendAuthorizedSwap(intent, authorization) {
       status: 'confirmed',
       digest,
       approvalDigests: digests,
+      approvalTxHashes,
       amountIn: amountIn.toString(),
       minAmountOut: BigInt(minAmountOut).toString(),
       logs: receipt.logs,
@@ -289,4 +429,12 @@ function sendAuthorizedSwap(intent, authorization) {
   return operation
 }
 
-export { getSigner, getSignerAddress, sendAuthorizedNativeTransfer, sendAuthorizedSwap, simulateAuthorizedSwap }
+export {
+  assertNativeAutoExecutable,
+  assertSwapAutoExecutable,
+  getSigner,
+  getSignerAddress,
+  sendAuthorizedNativeTransfer,
+  sendAuthorizedSwap,
+  simulateAuthorizedSwap,
+}

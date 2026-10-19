@@ -4,6 +4,14 @@ import { getToken } from '../chain/token-registry.tsx'
 import { buildSwapTransactions } from '../chain/transaction-builder.tsx'
 
 const swapRouterAbi = ['function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)']
+let runtimeOverrides = {}
+
+function setRuntimePolicyOverrides(overrides) {
+  if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) {
+    throw new Error('Runtime policy overrides must be an object')
+  }
+  runtimeOverrides = { ...overrides }
+}
 
 function parsePositiveWei(amount) {
   try {
@@ -15,23 +23,38 @@ function parsePositiveWei(amount) {
 }
 
 function readPolicyConfig(environment = process.env) {
+  const source = environment === process.env
+    ? { ...environment, ...runtimeOverrides }
+    : environment
   return {
-    chainId: Number(environment.CHAIN_ID || 31337),
-    maxPerTxWei: parseEther(environment.MAX_PER_TX_ETH || '0.02'),
-    maxPerRecipientPerDayWei: parseEther(environment.MAX_PER_RECIPIENT_PER_DAY_ETH || '0.05'),
-    maxTxPerWindow: Number(environment.MAX_TX_PER_WINDOW || 5),
-    velocityWindowSeconds: Number(environment.VELOCITY_WINDOW_SECONDS || 600),
-    allowedRecipients: new Set((environment.ALLOWED_RECIPIENTS || '')
+    chainId: Number(source.CHAIN_ID || 31337),
+    maxPerTxWei: parseEther(source.MAX_PER_TX_ETH || '0.02'),
+    maxPerRecipientPerDayWei: parseEther(source.MAX_PER_RECIPIENT_PER_DAY_ETH || '0.05'),
+    maxTxPerWindow: Number(source.MAX_TX_PER_WINDOW || 5),
+    velocityWindowSeconds: Number(source.VELOCITY_WINDOW_SECONDS || 600),
+    allowedRecipients: new Set((source.ALLOWED_RECIPIENTS || '')
       .split(',').map((address) => address.trim()).filter(Boolean).map(getAddress)),
-    allowedContracts: new Set((environment.ALLOWED_CONTRACTS || '')
+    allowedContracts: new Set((source.ALLOWED_CONTRACTS || '')
       .split(',').map((address) => address.trim()).filter(Boolean).map(getAddress)),
-    allowedSwapRouters: new Set((environment.ALLOWED_SWAP_ROUTERS || '')
+    allowedSwapRouters: new Set((source.ALLOWED_SWAP_ROUTERS || '')
       .split(',').map((address) => address.trim()).filter(Boolean).map(getAddress)),
-    swapRouterAddress: environment.SWAP_ROUTER_ADDRESS ? getAddress(environment.SWAP_ROUTER_ADDRESS) : '',
-    maxSlippageBps: Number(environment.MAX_SLIPPAGE_BPS || 100),
-    maxSwapInputAmount: environment.MAX_SWAP_INPUT_AMOUNT || '',
-    maxSwapPerTokenPerDay: environment.MAX_SWAP_PER_TOKEN_PER_DAY || '',
+    swapRouterAddress: source.SWAP_ROUTER_ADDRESS ? getAddress(source.SWAP_ROUTER_ADDRESS) : '',
+    maxSlippageBps: Number(source.MAX_SLIPPAGE_BPS || 100),
+    maxSwapInputAmount: source.MAX_SWAP_INPUT_AMOUNT || '',
+    maxSwapPerTokenPerDay: source.MAX_SWAP_PER_TOKEN_PER_DAY || '',
   }
+}
+
+// Add this new function to allow read-only actions
+function evaluateReadOnly(intent, config) {
+  if (intent.action === 'read_balance' || intent.action === 'read_quote') {
+    return {
+      allowed: true,
+      reason: 'Read-only action is always allowed.',
+      isReadOnly: true
+    }
+  }
+  return null
 }
 
 async function evaluateSwap(intent, { provider, recipient, config }) {
@@ -101,7 +124,7 @@ async function evaluateSwap(intent, { provider, recipient, config }) {
   }
 }
 
-function evaluateNativeTransfer(intent, config) {
+function evaluateNativeTransfer(intent, config, { authorizationTtlMs = 30000 } = {}) {
   if (intent.action !== 'transfer' || intent.from.token !== 'ETH') {
     return { allowed: false, reason: 'Only native ETH transfers are enabled by this signer.' }
   }
@@ -136,7 +159,7 @@ function evaluateNativeTransfer(intent, config) {
     intentId: intent.intentId,
     recipient,
     valueWei: valueWei.toString(),
-  })
+  }, authorizationTtlMs)
   return {
     allowed: true,
     reason: 'Recipient, chain, and per-transaction policy checks passed.',
@@ -145,4 +168,11 @@ function evaluateNativeTransfer(intent, config) {
   }
 }
 
-export { evaluateNativeTransfer, evaluateSwap, parsePositiveWei, readPolicyConfig }
+export {
+  evaluateNativeTransfer,
+  evaluateReadOnly,
+  evaluateSwap,
+  parsePositiveWei,
+  readPolicyConfig,
+  setRuntimePolicyOverrides,
+}

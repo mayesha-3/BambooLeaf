@@ -28,6 +28,18 @@ test('intent schema rejects non-positive and malformed decimal amounts', () => {
 
 test('goal body is strict and bounded', () => {
   assert.equal(goalRequestSchema.safeParse({ goal: 'send funds' }).success, true)
+  assert.equal(goalRequestSchema.safeParse({ goal: 'send funds', untrusted: ['invoice 123'] }).success, true)
   assert.equal(goalRequestSchema.safeParse({ goal: ' ', ignored: true }).success, false)
   assert.equal(goalRequestSchema.safeParse({ goal: 'x'.repeat(2001) }).success, false)
+})
+
+test('goal body accepts optional untrusted field', () => {
+  assert.equal(goalRequestSchema.safeParse({ goal: 'pay invoice', untrusted: ['Invoice #104: Pay 5 USDC'] }).success, true)
+  assert.equal(goalRequestSchema.safeParse({ goal: 'pay invoice' }).success, true, 'untrusted is optional')
+  assert.equal(goalRequestSchema.safeParse({ goal: 'pay invoice', untrusted: [] }).success, true, 'empty array is valid')
+})
+
+test('goal body rejects invalid untrusted field', () => {
+  assert.equal(goalRequestSchema.safeParse({ goal: 'pay', untrusted: ['x'.repeat(4001)] }).success, false, 'item exceeds 4000 chars')
+  assert.equal(goalRequestSchema.safeParse({ goal: 'pay', untrusted: ['a', 'b', 'c', 'd', 'e', 'f'] }).success, false, 'more than 5 items')
 })

@@ -1,6 +1,9 @@
 export const COLLECTIONS = Object.freeze({
   audit: 'audit_events',
   auditHeads: 'audit_heads',
+  policyVersions: 'policy_versions',
+  autonomyState: 'autonomy_state',
+  approvals: 'transaction_approvals',
   goals: 'goal_requests',
   policyUsage: 'policy_usage',
   deviceAccounts: 'device_accounts',
@@ -9,4 +12,10 @@ export const COLLECTIONS = Object.freeze({
   devices: 'devices',
   deviceAttempts: 'device_attempts',
   deviceBlocks: 'device_blocks',
+  suppliers: 'suppliers',
+  purchaseOrders: 'purchase_orders',
+  invoices: 'invoices',
+  runtimePolicy: 'runtime_policy',
+  roleAssignments: 'role_assignments',
+  trustedIps: 'trusted_ips',
 })

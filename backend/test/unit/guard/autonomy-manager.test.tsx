@@ -9,6 +9,7 @@ import {
   requireKillSwitchOff,
   reset,
   resetKillSwitch,
+  restoreState,
 } from '../../../src/guard/autonomy-manager.tsx'
 
 test('starts at L1', () => {
@@ -44,6 +45,7 @@ test('three blocked attempts demote to L0', () => {
   recordBlockedAttempt('Amount too high')
   recordBlockedAttempt('Unknown contract')
   assert.equal(getLevel(), 'L0')
+  assert.equal(isKillSwitchActive(), true)
 })
 
 test('kill switch blocks signing', () => {
@@ -57,4 +59,19 @@ test('resetKillSwitch restores L1', () => {
   resetKillSwitch()
   assert.equal(isKillSwitchActive(), false)
   assert.equal(getLevel(), 'L1')
+})
+
+test('restoring frozen state preserves the fail-closed level', () => {
+  restoreState({
+    level: 'L3',
+    cleanStreak: 9,
+    blockedInWindow: 3,
+    windowStartedAt: Date.now(),
+    lastDemotionReason: 'Repeated blocked attempts',
+    frozen: true,
+  })
+  assert.equal(getLevel(), 'L0')
+  assert.equal(isKillSwitchActive(), true)
+  assert.throws(() => restoreState({ level: 'L4' } as never), /invalid level/)
+  reset()
 })
