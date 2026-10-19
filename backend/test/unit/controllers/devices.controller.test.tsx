@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { deviceLoginState, enrollmentStatus } from '../../../src/controllers/devices.controller.tsx'
+import {
+  deviceLoginState,
+  enrollmentStatus,
+  sessionLifetimeMs,
+} from '../../../src/controllers/devices.controller.tsx'
+
+test('device sessions last at least two days', () => {
+  assert.ok(sessionLifetimeMs >= 2 * 24 * 60 * 60 * 1000)
+})
 
 test('configured owner wallet enrolls a new device without admin device approval', () => {
   const previousOwner = process.env.OWNER_WALLET_ADDRESS

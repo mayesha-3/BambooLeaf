@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { UserProfile } from '../../types'
 import { apiBaseUrl } from '../../config/api'
-import { authenticatedFetch } from '../../lib/device-session'
+import { authenticatedFetch, getDeviceSessionToken } from '../../lib/device-session'
 
 interface BalanceCard { kind: 'balance'; eth: string; usdc: string; total: string; change: string; chainId?: number }
 interface TransactionCard { kind: 'transaction'; status: 'confirmed' | 'pending' | 'blocked'; type: string; amount: string; to: string; hash?: string; reason?: string }
@@ -119,7 +119,7 @@ function PolicyCardView({ card }: { card: PolicyCard }) {
 }
 
 function ApprovalCardView({ card }: { card: ApprovalCard }) {
-  const hasSession = Boolean(window.sessionStorage.getItem('bambooleaf-device-session'))
+  const hasSession = Boolean(getDeviceSessionToken())
   const [status, setStatus] = useState<'checking' | 'pending' | 'executing' | 'approved' | 'rejected' | 'failed' | 'expired' | 'closed' | 'error'>(
     card.approvalId && hasSession ? 'checking' : 'error',
   )
@@ -136,7 +136,7 @@ function ApprovalCardView({ card }: { card: ApprovalCard }) {
   useEffect(() => {
     let active = true
     if (!card.approvalId) return
-    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    const token = getDeviceSessionToken()
     if (!token) return
     let timer: number | undefined
     const poll = async () => {

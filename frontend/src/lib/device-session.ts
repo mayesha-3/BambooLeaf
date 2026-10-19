@@ -4,10 +4,48 @@ const DATABASE = 'bambooleaf-device-keys'
 const STORE = 'key-pairs'
 const DEVICE_ID_KEY = 'bambooleaf-device-id'
 const SESSION_KEY = 'bambooleaf-device-session'
+const SESSION_CHANGED_EVENT = 'bambooleaf-session-changed'
 
 type DeviceKeys = { privateKey: CryptoKey; publicKey: JsonWebKey; deviceId: string }
 type InjectedWallet = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
+}
+
+export function getDeviceSessionToken(): string {
+  const persistentToken = window.localStorage.getItem(SESSION_KEY)
+  if (persistentToken) return persistentToken
+  const legacyToken = window.sessionStorage.getItem(SESSION_KEY)
+  if (!legacyToken) return ''
+  window.localStorage.setItem(SESSION_KEY, legacyToken)
+  window.sessionStorage.removeItem(SESSION_KEY)
+  return legacyToken
+}
+
+export function clearDeviceSession(): void {
+  window.localStorage.removeItem(SESSION_KEY)
+  window.sessionStorage.removeItem(SESSION_KEY)
+  window.dispatchEvent(new Event(SESSION_CHANGED_EVENT))
+}
+
+export async function signOutDeviceSession(): Promise<void> {
+  if (getDeviceSessionToken()) {
+    try {
+      const response = await authenticatedFetch(`${apiBaseUrl}/devices/session`, { method: 'DELETE' })
+      if (!response.ok && response.status !== 401) {
+        throw new Error(`Server sign-out failed (${response.status}).`)
+      }
+    } finally {
+      clearDeviceSession()
+    }
+    return
+  }
+  clearDeviceSession()
+}
+
+function setDeviceSessionToken(token: string): void {
+  window.localStorage.setItem(SESSION_KEY, token)
+  window.sessionStorage.removeItem(SESSION_KEY)
+  window.dispatchEvent(new Event(SESSION_CHANGED_EVENT))
 }
 
 function openKeyDatabase(): Promise<IDBDatabase> {
@@ -133,7 +171,7 @@ export async function enrollOrLoginDevice(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ walletAddress, deviceId: id, nonce: challenge.nonce, signature, walletSignature }),
   }))
-  window.sessionStorage.setItem(SESSION_KEY, login.token)
+  setDeviceSessionToken(login.token)
   return { status: 'approved', token: login.token, walletAddress, deviceId: id }
 }
 
@@ -143,7 +181,7 @@ async function sha256(text: string): Promise<string> {
 }
 
 export async function authenticatedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const token = window.sessionStorage.getItem(SESSION_KEY)
+  const token = getDeviceSessionToken()
   const headers = new Headers(init.headers)
   if (!token) return fetch(input, init)
   if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
@@ -158,14 +196,18 @@ export async function authenticatedFetch(input: RequestInfo | URL, init: Request
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ method, path, bodyHash }),
   })
-  const proof = await readResponse<{ nonce: string; message: string }>(proofResponse)
+  let proof: { nonce: string; message: string }
+  try {
+    proof = await readResponse<{ nonce: string; message: string }>(proofResponse)
+  } catch (error) {
+    if (proofResponse.status === 401) clearDeviceSession()
+    throw error
+  }
   const keys = await getDeviceKeys()
   const signature = await signMessage(proof.message, keys.privateKey)
   headers.set('x-device-challenge', proof.nonce)
   headers.set('x-device-signature', signature)
-  return fetch(input, { ...init, headers })
-}
-
-export function clearDeviceSession(): void {
-  window.sessionStorage.removeItem(SESSION_KEY)
+  const response = await fetch(input, { ...init, headers })
+  if (response.status === 401) clearDeviceSession()
+  return response
 }

@@ -27,6 +27,8 @@ React UI
 
 Main implementation references: [goals service](../backend/src/services/goals.service.tsx), [planner bridge](../backend/llm-planner/src/backend-bridge.ts), [quarantine inspector](../backend/llm-planner/src/quarantine.ts), [policy engine](../backend/src/guard/policy-engine.tsx), [tier router](../backend/src/guard/tier-router.tsx), and [signer service](../backend/src/signer/signer-service.tsx).
 
+**Identity and roles:** the configured `OWNER_WALLET_ADDRESS` is the owner admin identity; approver, clerk, and auditor access comes from the configured wallet lists and admin-managed role assignments. Device enrollment and wallet signatures establish account/device identity, while device and IP blocks are checked on authenticated requests. Role checks are enforced by the API. Device sessions expire after 30 days and are stored persistently by the browser; admin device revocation invalidates that wallet/device's sessions.
+
 ## Transaction path and current support
 
 1. The API validates request shape and size.

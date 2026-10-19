@@ -2,12 +2,14 @@ import { useState, useEffect, useRef } from 'react'
 import Icon from './ui/Icon'
 import Badge from './ui/Badge'
 import type { UserProfile, Page } from '../types'
+import { signOutDeviceSession } from '../lib/device-session'
 
 interface ProfileDropdownProps {
   user: UserProfile
   isOpen: boolean
   onClose: () => void
   onNavigate: (page: Page) => void
+  onSignOut: () => void
 }
 
 export default function ProfileDropdown({
@@ -15,6 +17,7 @@ export default function ProfileDropdown({
   isOpen,
   onClose,
   onNavigate,
+  onSignOut,
 }: ProfileDropdownProps) {
   const [copied, setCopied] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -67,7 +70,7 @@ export default function ProfileDropdown({
             <h3 className="text-sm font-extrabold text-slate-900 dark:text-white truncate">
               {user.name}
             </h3>
-            <Badge tone="green">Owner</Badge>
+            <Badge tone="green">{user.role}</Badge>
           </div>
           <p className="text-xs text-slate-400 dark:text-slate-400 font-mono truncate mt-0.5">
             {user.handle}
@@ -82,7 +85,7 @@ export default function ProfileDropdown({
       <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/80 border border-slate-100 dark:border-slate-800 space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 dark:text-slate-500">
-            Guarded Wallet · Sepolia
+            Connected identity wallet
           </span>
           <span className="flex items-center gap-1.5 text-[10px] font-bold text-[#65A30D] dark:text-lime-400">
             <span className="w-1.5 h-1.5 rounded-full bg-[#84CC16]" />
@@ -177,9 +180,9 @@ export default function ProfileDropdown({
         <button
           onClick={() => {
             onClose()
-            // Clear session storage if needed
-            window.sessionStorage.removeItem('bambooleaf-device-session')
-            window.location.reload()
+            void signOutDeviceSession()
+              .catch((error: unknown) => console.error('Could not revoke the server session during sign-out:', error))
+              .finally(onSignOut)
           }}
           className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
         >

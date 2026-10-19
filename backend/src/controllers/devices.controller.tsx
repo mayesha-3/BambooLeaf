@@ -700,5 +700,6 @@ export {
   login,
   logout,
   reviewDevice,
+  sessionLifetimeMs,
   updateBlock,
 }

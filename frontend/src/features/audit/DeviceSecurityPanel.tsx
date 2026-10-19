@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { authenticatedFetch, enrollOrLoginDevice } from '../../lib/device-session'
+import { authenticatedFetch, clearDeviceSession, enrollOrLoginDevice, getDeviceSessionToken } from '../../lib/device-session'
 
 type DeviceRecord = {
   deviceId: string
@@ -68,7 +68,7 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
   useEffect(() => {
     let active = true
     try {
-      const storedToken = window.sessionStorage.getItem('bambooleaf-device-session')
+      const storedToken = getDeviceSessionToken()
       const storedDeviceId = window.localStorage.getItem('bambooleaf-device-id')
       const currentDeviceId = storedDeviceId || window.crypto.randomUUID()
       if (!storedDeviceId) window.localStorage.setItem('bambooleaf-device-id', currentDeviceId)
@@ -92,7 +92,7 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
     const payload = await response.json() as DeviceSnapshot & { error?: string }
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        window.sessionStorage.removeItem('bambooleaf-device-session')
+        clearDeviceSession()
         setToken('')
       }
       throw new Error(payload.error || `Device request failed (${response.status})`)
@@ -252,7 +252,7 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
     } catch {
       setError('Could not confirm server sign-out. The local session was still cleared.')
     } finally {
-      window.sessionStorage.removeItem('bambooleaf-device-session')
+      clearDeviceSession()
       setToken('')
       setSnapshot(null)
       setBusy(false)

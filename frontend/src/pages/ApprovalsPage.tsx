@@ -4,7 +4,7 @@ import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import PageHeading from '../components/ui/PageHeading'
 import { apiBaseUrl } from '../config/api'
-import { authenticatedFetch } from '../lib/device-session'
+import { authenticatedFetch, getDeviceSessionToken } from '../lib/device-session'
 
 interface ApprovalItem {
   id: string
@@ -19,7 +19,7 @@ interface ApprovalItem {
   reason: string
   tone: 'green' | 'amber' | 'rose'
   digest: string
-  tier: 'Tier 2 · Owner Approval Required' | 'Tier 3 · High Value Multi-sig'
+  tier: 'Tier 2 · Authorized Approval Required' | 'Tier 3 · High Value Multi-sig'
 }
 
 interface SupplierApprovalItem {
@@ -43,9 +43,9 @@ export default function ApprovalsPage() {
   const [inspectingItem, setInspectingItem] = useState<ApprovalItem | null>(null)
 
   const loadApprovals = useCallback(async () => {
-    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    const token = getDeviceSessionToken()
     if (!token) {
-      setError('Sign in with the owner wallet under Device Security to review approvals.')
+      setError('Sign in with an admin or approver wallet under Device Security to review approvals.')
       setLoading(false)
       return
     }
@@ -96,7 +96,7 @@ export default function ApprovalsPage() {
         reason: item.reasons.join('; '),
         tone: 'amber',
         digest: item.digest,
-        tier: 'Tier 2 · Owner Approval Required',
+        tier: 'Tier 2 · Authorized Approval Required',
       })))
       setSupplierItems((supplierPayload.suppliers || []).filter((supplier) =>
         supplier.status === 'pending_approval' || Boolean(supplier.pendingChange)))
@@ -129,9 +129,9 @@ export default function ApprovalsPage() {
   }
 
   async function decide(item: ApprovalItem, approved: boolean) {
-    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    const token = getDeviceSessionToken()
     if (!token) {
-      setError('Sign in with the owner wallet under Device Security before deciding.')
+      setError('Sign in with an admin or approver wallet under Device Security before deciding.')
       return
     }
     setBusyId(item.id)
@@ -364,7 +364,7 @@ export default function ApprovalsPage() {
             <Icon name="checkCircle" size={20} />
           </span>
           <h2 className="mt-4 text-sm font-bold text-slate-900 dark:text-white">{loading ? 'Loading approvals…' : error ? 'Approvals unavailable' : 'Queue is clear'}</h2>
-          <p className="mt-1 text-xs text-slate-400">{loading ? 'Checking the owner-authenticated approval queue.' : error ? 'Sign in with the configured owner wallet and confirm the backend is reachable.' : 'There are no pending approvals requiring human review.'}</p>
+          <p className="mt-1 text-xs text-slate-400">{loading ? 'Checking the admin/approver approval queue.' : error ? 'Sign in with an admin or approver wallet and confirm the backend is reachable.' : 'There are no pending approvals requiring human review.'}</p>
           <button
             onClick={() => void loadApprovals()}
             className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:border-lime-500 transition"

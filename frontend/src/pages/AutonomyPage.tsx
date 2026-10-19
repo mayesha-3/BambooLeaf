@@ -4,7 +4,7 @@ import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import PageHeading from '../components/ui/PageHeading'
 import { apiBaseUrl } from '../config/api'
-import { authenticatedFetch } from '../lib/device-session'
+import { authenticatedFetch, getDeviceSessionToken } from '../lib/device-session'
 
 type AutonomySnapshot = {
   level: 'L0' | 'L1' | 'L2' | 'L3'
@@ -12,6 +12,7 @@ type AutonomySnapshot = {
   blockedInWindow: number
   frozen: boolean
   lastDemotionReason: string | null
+  canManage?: boolean
 }
 
 export default function AutonomyPage() {
@@ -21,9 +22,9 @@ export default function AutonomyPage() {
   const [error, setError] = useState('')
 
   const loadState = useCallback(async () => {
-    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    const token = getDeviceSessionToken()
     if (!token) {
-      setError('Sign in with the owner wallet under Device Security to view and manage autonomy.')
+      setError('Sign in with an admin, approver, or auditor wallet to view autonomy.')
       setLoading(false)
       return
     }
@@ -49,11 +50,15 @@ export default function AutonomyPage() {
 
   async function changeSafetyState() {
     if (!snapshot) return
+    if (!snapshot.canManage) {
+      setError('Only the configured owner wallet can change autonomy controls.')
+      return
+    }
     const resetting = snapshot.frozen || snapshot.level === 'L0'
     if (resetting && !window.confirm('Reset to L1? Signing permissions will be restored only at the restricted level.')) return
-    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    const token = getDeviceSessionToken()
     if (!token) {
-      setError('Sign in with the owner wallet under Device Security before changing autonomy.')
+      setError('Sign in with the configured owner wallet under Device Security before changing autonomy.')
       return
     }
     setBusy(true)
@@ -99,18 +104,18 @@ export default function AutonomyPage() {
               </div>
               <p className="mt-3 max-w-md text-xs leading-5 text-slate-300">
                 {requiresHumanReset
-                  ? 'L0 is read-only and blocks transactions. Only an owner human reset can restore action permissions.'
+                  ? 'L0 is read-only and blocks transactions. Only the configured owner wallet can reset action permissions.'
                   : 'Routine low-risk actions may proceed within policy. New or elevated-risk actions still require approval.'}
               </p>
             </div>
-            <button
+            {snapshot?.canManage ? <button
               onClick={() => void changeSafetyState()}
               disabled={!snapshot || busy}
               className={`rounded-full px-5 py-2.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${requiresHumanReset ? 'bg-white text-slate-950 hover:bg-slate-100' : 'border border-white/20 bg-white/10 text-white hover:bg-white/20'
                 }`}
             >
               {busy ? 'Updating…' : requiresHumanReset ? 'Human reset to L1' : 'Activate kill switch'}
-            </button>
+            </button> : <p className="max-w-xs text-right text-xs text-slate-300">Read access only. The configured owner wallet controls the kill switch and reset.</p>}
           </div>
         </div>
         <div className="grid gap-0 divide-y divide-slate-100 dark:divide-slate-800 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
@@ -136,7 +141,7 @@ export default function AutonomyPage() {
           <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
             {[
               { level: 'L0', name: 'Read-only', desc: 'Balances, quotes, explanations. Never signs.' },
-              { level: 'L1', name: 'Restricted', desc: 'Every action waits for owner approval.' },
+              { level: 'L1', name: 'Restricted', desc: 'Every action waits for authorized human approval.' },
               { level: 'L2', name: 'Standard', desc: 'Low-risk actions under caps may auto-execute.' },
               { level: 'L3', name: 'Trusted', desc: 'Wider limits, still bounded by owner policy.' },
             ].map((item) => (

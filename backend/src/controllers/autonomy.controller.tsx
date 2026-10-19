@@ -21,7 +21,7 @@ function isOwner(request) {
 }
 
 function getAutonomy(request, response) {
-  response.json(getState())
+  response.json({ ...getState(), canManage: isOwner(request) })
 }
 
 async function activate(request, response, next) {

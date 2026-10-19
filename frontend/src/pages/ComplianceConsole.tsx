@@ -3,7 +3,7 @@ import Card from '../components/ui/Card'
 import Icon from '../components/ui/Icon'
 import PageHeading from '../components/ui/PageHeading'
 import { apiBaseUrl } from '../config/api'
-import { authenticatedFetch, enrollOrLoginDevice } from '../lib/device-session'
+import { authenticatedFetch, clearDeviceSession, enrollOrLoginDevice, getDeviceSessionToken } from '../lib/device-session'
 
 type AuditEntry = {
   seq: number
@@ -50,7 +50,7 @@ function filterQuery(filters: ConsoleFilters, limit = 100, beforeSeq?: number) {
 }
 
 export default function ComplianceConsole() {
-  const [token, setToken] = useState(() => window.sessionStorage.getItem('bambooleaf-device-session') || '')
+  const [token, setToken] = useState(() => getDeviceSessionToken())
   const [role, setRole] = useState('')
   const [filters, setFilters] = useState<ConsoleFilters>(initialFilters)
   const [entries, setEntries] = useState<AuditEntry[]>([])
@@ -98,13 +98,13 @@ export default function ComplianceConsole() {
       if (failedResponse) {
         const [response, payload] = failedResponse as [Response, { error?: string }]
         if (response.status === 401) {
-          window.sessionStorage.removeItem('bambooleaf-device-session')
+          clearDeviceSession()
           setToken('')
         }
         throw new Error(payload.error || `Compliance API returned ${response.status}`)
       }
       if (!['admin', 'approver', 'auditor'].includes(access.role || '')) {
-        throw new Error('The signed-in wallet does not have auditor or owner read access.')
+        throw new Error('The signed-in wallet does not have admin, approver, or auditor read access.')
       }
       setRole(access.role || '')
       setEntries((current) => append ? [...current, ...(audit.entries || [])] : audit.entries || [])
@@ -119,7 +119,9 @@ export default function ComplianceConsole() {
   }, [filters, requestHeaders])
 
   useEffect(() => {
-    if (token) void loadConsole(token)
+    if (!token) return
+    const timer = window.setTimeout(() => void loadConsole(token), 0)
+    return () => window.clearTimeout(timer)
   }, [token, loadConsole])
 
   async function connectAuditor(event: FormEvent<HTMLFormElement>) {
@@ -202,8 +204,8 @@ export default function ComplianceConsole() {
 
       {!token ? (
         <Card className="mx-auto max-w-xl p-8">
-          <h2 className="text-base font-bold">Sign in as an auditor</h2>
-          <p className="mt-2 text-sm text-slate-500">Connect a wallet configured in the backend auditor allowlist. The owner wallet can also view this console. This session grants no policy-edit, freeze, or reset permission.</p>
+          <h2 className="text-base font-bold">Sign in to view compliance records</h2>
+          <p className="mt-2 text-sm text-slate-500">Connect an admin, approver, or auditor wallet configured by the backend. This session grants read-only access and no policy-edit, freeze, or reset permission.</p>
           <form onSubmit={(event) => void connectAuditor(event)}>
             <button disabled={loading} className="mt-5 rounded-full bg-slate-950 px-5 py-2.5 text-xs font-bold text-white disabled:opacity-50">
               {loading ? 'Connecting…' : 'Connect wallet for read access'}

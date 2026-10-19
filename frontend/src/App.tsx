@@ -18,9 +18,71 @@ import ComplianceConsole from './pages/ComplianceConsole'
 import PaymentsPage from './pages/PaymentsPage'
 import ProfileDropdown from './components/ProfileDropdown'
 import LiveMarketTicker from './features/market/LiveMarketTicker'
-import { authenticatedFetch } from './lib/device-session'
+import {
+  authenticatedFetch,
+  clearDeviceSession,
+  enrollOrLoginDevice,
+  getDeviceSessionToken,
+} from './lib/device-session'
 
 const validPages: Page[] = ['overview', 'chat', 'activity', 'approvals', 'policy', 'autonomy', 'wallet', 'arena', 'compliance', 'payments', 'settings', 'transact']
+const profileStorageKey = 'bambooleaf_user_profile'
+
+type AccountIdentity = { walletAddress: string; role: string | null }
+type InjectedWallet = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> }
+
+function roleLabel(role: string | null): string {
+  if (!role) return 'Unassigned'
+  return `${role.charAt(0).toUpperCase()}${role.slice(1)}`
+}
+
+function profileKey(walletAddress: string): string {
+  return `${profileStorageKey}:${walletAddress.toLowerCase()}`
+}
+
+function profileForAccount(walletAddress: string, role: string | null): UserProfile {
+  const shortWallet = `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}`
+  let saved: Partial<UserProfile> | null = null
+  try {
+    const walletProfile = localStorage.getItem(profileKey(walletAddress))
+    const legacyProfile = localStorage.getItem(profileStorageKey)
+    const parsed = walletProfile || legacyProfile
+    if (parsed) {
+      const candidate = JSON.parse(parsed) as Partial<UserProfile>
+      if (walletProfile || candidate.walletAddress?.toLowerCase() === walletAddress.toLowerCase()) {
+        saved = candidate
+      }
+    }
+  } catch {
+    saved = null
+  }
+  const name = typeof saved?.name === 'string' && saved.name.trim() ? saved.name : shortWallet
+  return {
+    name,
+    handle: typeof saved?.handle === 'string' && saved.handle ? saved.handle : shortWallet,
+    email: typeof saved?.email === 'string' ? saved.email : '',
+    walletAddress,
+    role: roleLabel(role),
+    avatarColor: typeof saved?.avatarColor === 'string' ? saved.avatarColor : 'from-[#65A30D] to-[#84CC16]',
+    bio: typeof saved?.bio === 'string' ? saved.bio : '',
+    telegram: typeof saved?.telegram === 'string' ? saved.telegram : '',
+    cardName: typeof saved?.cardName === 'string' ? saved.cardName : `${name.toUpperCase()} · ${roleLabel(role).toUpperCase()}`,
+  }
+}
+
+function guestProfile(): UserProfile {
+  return {
+    name: 'Guest',
+    handle: 'Not signed in',
+    email: '',
+    walletAddress: '',
+    role: 'Not signed in',
+    avatarColor: 'from-slate-500 to-slate-700',
+    bio: '',
+    telegram: '',
+    cardName: 'GUEST',
+  }
+}
 
 const navGroups: { label: string; items: { id: Page; label: string; icon: IconName; count?: string; isChat?: boolean }[] }[] = [
   {
@@ -131,39 +193,95 @@ export function App() {
     }
   }, [darkMode])
 
-  // User Profile state with local persistence
-  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
-    try {
-      const saved = localStorage.getItem('bambooleaf_user_profile')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (!parsed.cardName) parsed.cardName = parsed.name ? `${parsed.name.toUpperCase()} · OWNER` : 'MAYES · OWNER'
-        return parsed
-      }
-    } catch {
-      // fallback
-    }
-    return {
-      name: 'Mayes',
-      handle: 'owner@bambooleaf.eth',
-      email: 'mayes@bambooleaf.eth',
-      walletAddress: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
-      role: 'Primary Signer · Workspace Owner',
-      avatarColor: 'from-[#65A30D] to-[#84CC16]',
-      bio: 'Guarded agent workspace administrator on Sepolia testnet.',
-      telegram: '@mayes_guard',
-      cardName: 'MAYES · OWNER',
-    }
-  })
-
+  const [account, setAccount] = useState<AccountIdentity | null>(null)
+  const [sessionLoading, setSessionLoading] = useState(() => Boolean(getDeviceSessionToken()))
+  const [loginBusy, setLoginBusy] = useState(false)
+  const [accountMessage, setAccountMessage] = useState('')
+  const [userProfile, setUserProfile] = useState<UserProfile>(guestProfile)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
+
+  const refreshSession = useCallback(async () => {
+    const token = getDeviceSessionToken()
+    if (!token) {
+      setAccount(null)
+      setUserProfile(guestProfile())
+      setSessionLoading(false)
+      return
+    }
+    try {
+      const response = await authenticatedFetch(`${apiBaseUrl}/devices`)
+      const result = await response.json() as { walletAddress?: string; role?: string | null; error?: string }
+      if (getDeviceSessionToken() !== token) return
+      if (!response.ok || typeof result.walletAddress !== 'string') {
+        throw new Error(result.error || `Could not verify the signed-in wallet (${response.status}).`)
+      }
+      const identity = { walletAddress: result.walletAddress, role: result.role || null }
+      setAccount(identity)
+      setUserProfile(profileForAccount(identity.walletAddress, identity.role))
+      setAccountMessage('')
+    } catch (error) {
+      if (!getDeviceSessionToken()) {
+        setAccount(null)
+        setUserProfile(guestProfile())
+      } else {
+        setAccountMessage(error instanceof Error ? error.message : 'Could not verify the signed-in wallet.')
+      }
+    } finally {
+      setSessionLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const onSessionChange = () => { void refreshSession() }
+    window.addEventListener('bambooleaf-session-changed', onSessionChange)
+    window.addEventListener('storage', onSessionChange)
+    window.addEventListener('focus', onSessionChange)
+    void refreshSession()
+    return () => {
+      window.removeEventListener('bambooleaf-session-changed', onSessionChange)
+      window.removeEventListener('storage', onSessionChange)
+      window.removeEventListener('focus', onSessionChange)
+    }
+  }, [refreshSession])
+
+  const login = async () => {
+    setLoginBusy(true)
+    setAccountMessage('')
+    try {
+      const wallet = (window as Window & { ethereum?: InjectedWallet }).ethereum
+      if (!wallet) throw new Error('No browser wallet was found. Install or unlock a wallet extension and try again.')
+      const result = await enrollOrLoginDevice(wallet)
+      if (result.status === 'pending' || !result.token) {
+        setAccountMessage('Your wallet’s device access request is pending admin approval.')
+        return
+      }
+      await refreshSession()
+    } catch (error) {
+      setAccountMessage(error instanceof Error ? error.message : 'Wallet sign-in failed.')
+    } finally {
+      setLoginBusy(false)
+    }
+  }
+
+  const signOut = () => {
+    setAccount(null)
+    setUserProfile(guestProfile())
+    setAccountMessage('')
+    clearDeviceSession()
+  }
 
   const handleUpdateProfile = (updated: UserProfile) => {
     setUserProfile(updated)
-    try {
-      localStorage.setItem('bambooleaf_user_profile', JSON.stringify(updated))
-    } catch {
-      // ignore
+    if (account) {
+      try {
+        localStorage.setItem(profileKey(account.walletAddress), JSON.stringify({
+          ...updated,
+          walletAddress: account.walletAddress,
+          role: roleLabel(account.role),
+        }))
+      } catch {
+        setAccountMessage('Profile was updated for this visit but could not be saved in browser storage.')
+      }
     }
   }
 
@@ -209,12 +327,12 @@ export function App() {
 
   const refreshAudit = useCallback(async () => {
     setAuditState((current) => ({ ...current, loading: true, error: '' }))
-    const token = window.sessionStorage.getItem('bambooleaf-device-session')
+    const token = getDeviceSessionToken()
     if (!token) {
       setAuditState((current) => ({
         ...current,
         valid: null,
-        error: 'Sign in with an authorized owner or auditor wallet to view audit records.',
+        error: 'Sign in with an authorized admin, approver, or auditor wallet to view audit records.',
         loading: false,
       }))
       return
@@ -566,34 +684,49 @@ export function App() {
               <Icon name="settings" size={17} />
             </button>
 
-            {/* User Profile Chip + Dropdown (Mayes / Owner Workspace) */}
-            <div className="relative">
-              <button
-                onClick={() => setShowProfileMenu((prev) => !prev)}
-                className="flex items-center gap-2 md:gap-3 pl-1 pr-1.5 md:pr-2.5 py-1 rounded-full hover:bg-slate-100/70 dark:hover:bg-slate-800/70 cursor-pointer transition select-none border border-transparent hover:border-slate-200/80 dark:hover:border-slate-800 focus:outline-none"
-                aria-label="User profile menu"
-                aria-expanded={showProfileMenu}
-              >
-                <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${userProfile.avatarColor} text-white font-extrabold flex items-center justify-center shadow-sm text-sm`}>
-                  {userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'M'}
-                </div>
-                <div className="hidden sm:block text-left leading-tight">
-                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{userProfile.name}</p>
-                  <p className="text-[10px] text-slate-400">{userProfile.handle}</p>
-                </div>
-                <Icon name="chevronDown" size={12} className={`text-slate-400 hidden sm:block transition-transform duration-200 ${showProfileMenu ? 'rotate-180' : ''}`} />
-              </button>
+            {/* Signed-in identity comes from the authenticated wallet session. */}
+            {account ? (
+              <div className="relative">
+                <button
+                  onClick={() => setShowProfileMenu((prev) => !prev)}
+                  className="flex items-center gap-2 md:gap-3 pl-1 pr-1.5 md:pr-2.5 py-1 rounded-full hover:bg-slate-100/70 dark:hover:bg-slate-800/70 cursor-pointer transition select-none border border-transparent hover:border-slate-200/80 dark:hover:border-slate-800 focus:outline-none"
+                  aria-label="User profile menu"
+                  aria-expanded={showProfileMenu}
+                >
+                  <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${userProfile.avatarColor} text-white font-extrabold flex items-center justify-center shadow-sm text-sm`}>
+                    {userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'U'}
+                  </div>
+                  <div className="hidden sm:block text-left leading-tight">
+                    <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{userProfile.name}</p>
+                    <p className="text-[10px] text-slate-400">{userProfile.role}</p>
+                  </div>
+                  <Icon name="chevronDown" size={12} className={`text-slate-400 hidden sm:block transition-transform duration-200 ${showProfileMenu ? 'rotate-180' : ''}`} />
+                </button>
 
-              <ProfileDropdown
-                user={userProfile}
-                isOpen={showProfileMenu}
-                onClose={() => setShowProfileMenu(false)}
-                onNavigate={(dest) => {
-                  setShowProfileMenu(false)
-                  navigate(dest)
-                }}
-              />
-            </div>
+                <ProfileDropdown
+                  user={userProfile}
+                  isOpen={showProfileMenu}
+                  onSignOut={signOut}
+                  onClose={() => setShowProfileMenu(false)}
+                  onNavigate={(dest) => {
+                    setShowProfileMenu(false)
+                    navigate(dest)
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="flex flex-col items-end">
+                <button
+                  type="button"
+                  onClick={() => void login()}
+                  disabled={loginBusy || sessionLoading}
+                  className="rounded-full bg-slate-950 dark:bg-lime-400 dark:text-slate-950 px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
+                >
+                  {sessionLoading ? 'Checking…' : loginBusy ? 'Connecting…' : 'Login'}
+                </button>
+                {accountMessage && <span role="status" className="absolute right-4 top-16 z-50 max-w-xs rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow">{accountMessage}</span>}
+              </div>
+            )}
 
             {/* + Plan goal Button */}
             <button

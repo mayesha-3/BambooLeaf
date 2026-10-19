@@ -13,6 +13,13 @@ function hashBody(body) {
   return createHash('sha256').update(body || '').digest('hex')
 }
 
+function deleteDeviceSessions(database, session) {
+  return database.collection(COLLECTIONS.deviceSessions).deleteMany({
+    walletAddress: session.walletAddress,
+    deviceId: session.deviceId,
+  })
+}
+
 async function requireDeviceSession(request, response, next) {
   const authorization = request.get('authorization') || ''
   const match = authorization.match(/^Bearer\s+(.+)$/i)
@@ -39,7 +46,7 @@ async function requireDeviceSession(request, response, next) {
       status: 'approved',
     })
     if (!device || device.revokedAt) {
-      await database.collection(COLLECTIONS.deviceSessions).deleteMany({ deviceId: session.deviceId })
+      await deleteDeviceSessions(database, session)
       response.status(401).json({ error: 'This device is not approved or has been revoked.' })
       return
     }
@@ -89,8 +96,8 @@ async function requireDeviceSession(request, response, next) {
       ],
     })
     if (blocked) {
-      await database.collection(COLLECTIONS.deviceSessions).deleteOne({ _id: session._id })
-      response.status(403).json({ error: 'This device or IP address is blocked for this wallet.' })
+      await deleteDeviceSessions(database, session)
+      response.status(401).json({ error: 'This device or IP address is blocked for this wallet.' })
       return
     }
 
@@ -139,7 +146,7 @@ async function createRequestProof(request, response, next) {
       revokedAt: { $exists: false },
     })
     if (!device) {
-      await database.collection(COLLECTIONS.deviceSessions).deleteMany({ deviceId: session.deviceId })
+      await deleteDeviceSessions(database, session)
       response.status(401).json({ error: 'This device is not approved or has been revoked.' })
       return
     }
@@ -161,4 +168,4 @@ async function createRequestProof(request, response, next) {
   }
 }
 
-export { createRequestProof, hashBody, hashToken, requireAuditReadAccess, requireDeviceSession }
+export { createRequestProof, deleteDeviceSessions, hashBody, hashToken, requireAuditReadAccess, requireDeviceSession }
