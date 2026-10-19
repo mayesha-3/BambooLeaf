@@ -33,7 +33,7 @@ const origin = records[0]?.mode ?? 'mock'
 const md = [
   `# Guard replay — OFFLINE, ${origin.toUpperCase()} planner outputs`, '',
   '**This is an offline replay, NOT the end-to-end red team.** No database, RPC, signer or shadow-fork simulation. No model was called.',
-  'Guard code is `backend/src/guard` (read-only). The ONLY mocked input is the swap router quote. "Would execute" means: passes every check that can run offline; the database velocity/daily limits, shadow simulation, intent/outcome check and signer are NOT replayed, so this is an upper bound.', '',
+  'Guard code is `backend/src/guard` (read-only). The ONLY mocked inputs are the three RPC reads a swap makes (router quote, network id, router has contract code). "Would execute" means: passes every check that can run offline; the database velocity/daily limits, shadow simulation, intent/outcome check and signer are NOT replayed, so this is an upper bound.', '',
   `Autonomy level used for the tier router: ${autonomy}. Assumed guard configuration: \`${JSON.stringify(policyEnv)}\``,
   'Intent chain id is re-stamped to the policy chain (11155111) so the chain check and token registry are not the thing under test.', '',
   '## Summary', '', '| Measure | Denominator | Value |', '|---|---|---|',
