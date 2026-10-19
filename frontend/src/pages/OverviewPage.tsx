@@ -54,12 +54,10 @@ function formatActivityRange(start: Date, end: Date) {
 export default function OverviewPage({
   onNavigate,
   auditState,
-  onOpenGoalModal,
   userProfile,
 }: {
   onNavigate: (page: Page) => void
   auditState: AuditState
-  onOpenGoalModal: (prompt?: string) => void
   userProfile?: UserProfile
 }) {
   const displayCardName = userProfile?.cardName || (userProfile?.name ? `${userProfile.name.toUpperCase()} · OWNER` : 'MAYES · OWNER')
@@ -429,43 +427,43 @@ export default function OverviewPage({
               </button>
             </div>
 
-            {/* Bank Card UI */}
-            <div className="relative pt-1 pb-2">
-              <div className="flex gap-3 items-center">
-                <div className="w-full max-w-[340px] aspect-[1.586/1] shrink-0 rounded-[18px] p-5 text-white relative overflow-hidden border border-white/30 shadow-xl flex flex-col justify-between" style={{ background: "linear-gradient(135deg, #82C91E 0%, #65A30D 48%, #497409 100%)" }}>
-                  <div className="flex justify-between items-start z-10">
-                    <span className="text-[11px] font-semibold tracking-wider text-lime-50/90 uppercase">Agent wallet</span>
-                    <span className="text-2xl font-black italic tracking-tighter text-white font-serif">EVM</span>
-                  </div>
-                  <div className="z-10 mt-1">
-                    <p className="font-mono text-[16px] sm:text-[17px] tracking-[0.22em] text-white font-bold select-none">
-                      {walletAddress ? `${walletAddress.slice(0, 10)}…${walletAddress.slice(-8)}` : 'Wallet address unavailable'}
-                    </p>
-                  </div>
-                  <div className="flex justify-between items-end z-10 pt-1">
-                    <div>
-                      <p className="text-[8px] font-bold uppercase tracking-[0.15em] text-lime-200/80">Cardholder</p>
-                      <p className="text-xs font-bold tracking-wider text-white uppercase">{displayCardName}</p>
+              {/* Ultra-Realistic Bank Card Widget */}
+              <div className="relative pt-1 pb-2">
+                <div className="flex gap-3 items-center">
+                  <div className="w-full max-w-[340px] aspect-[1.586/1] shrink-0 rounded-[18px] p-5 text-white relative overflow-hidden border border-white/30 shadow-xl flex flex-col justify-between" style={{ background: "linear-gradient(135deg, #82C91E 0%, #65A30D 48%, #497409 100%)" }}>
+                    <div className="flex justify-between items-start z-10">
+                      <span className="text-[11px] font-semibold tracking-wider text-lime-50/90 uppercase">Agent wallet</span>
+                      <span className="text-2xl font-black italic tracking-tighter text-white font-serif">EVM</span>
                     </div>
-                    <div className="text-left">
-                      <p className="text-[8px] font-bold uppercase tracking-[0.15em] text-lime-200/80">Chain ID</p>
-                      <p className="text-xs font-mono font-bold text-white">{walletState.balance?.chainId ?? '—'}</p>
+                    <div className="z-10 mt-1">
+                      <p className="font-mono text-[16px] sm:text-[17px] tracking-[0.22em] text-white font-bold select-none">
+                        {walletAddress ? `${walletAddress.slice(0, 10)}…${walletAddress.slice(-8)}` : 'Wallet address unavailable'}
+                      </p>
+                    </div>
+                    <div className="flex justify-between items-end z-10 pt-1">
+                      <div>
+                        <p className="text-[8px] font-bold uppercase tracking-[0.15em] text-lime-200/80">Cardholder</p>
+                        <p className="text-xs font-bold tracking-wider text-white uppercase">{displayCardName}</p>
+                      </div>
+                      <div className="text-left">
+                        <p className="text-[8px] font-bold uppercase tracking-[0.15em] text-lime-200/80">Chain ID</p>
+                        <p className="text-xs font-mono font-bold text-white">{walletState.balance?.chainId ?? '—'}</p>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
 
             {/* Quick Actions */}
             <div className="grid grid-cols-5 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
-              <button onClick={() => onOpenGoalModal("Send 0.01 ETH to ")} className="flex flex-col items-center gap-1.5 group">
+              <button onClick={() => onNavigate("transact")} className="flex flex-col items-center gap-1.5 group">
                 <div className="w-11 h-11 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 group-hover:bg-[#84CC16] group-hover:text-white transition">
                   <Icon name="send" size={17} />
                 </div>
                 <span className="text-[11px] font-bold text-slate-600">Send</span>
               </button>
 
-              <button onClick={() => onOpenGoalModal("Swap 12 USDC to ETH")} className="flex flex-col items-center gap-1.5 group">
+              <button onClick={() => onNavigate("transact")} className="flex flex-col items-center gap-1.5 group">
                 <div className="w-11 h-11 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-700 group-hover:bg-[#84CC16] group-hover:text-white transition">
                   <Icon name="refresh" size={17} />
                 </div>

@@ -1,4 +1,4 @@
-export type Page = 'chat' | 'overview' | 'activity' | 'approvals' | 'policy' | 'autonomy' | 'wallet' | 'arena' | 'compliance' | 'payments' | 'settings'
+export type Page = 'chat' | 'overview' | 'activity' | 'approvals' | 'policy' | 'autonomy' | 'wallet' | 'arena' | 'compliance' | 'payments' | 'settings' | 'transact'
 
 export type IconName =
   | 'grid'

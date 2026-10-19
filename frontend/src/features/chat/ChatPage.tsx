@@ -467,10 +467,6 @@ function ContextPanel({ width, onResizeStart, userProfile }: { width: number; on
         </div>
 
         <div>
-          <div className="flex items-center justify-between mb-2.5"><p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Pending approvals</p><span className="bg-amber-400 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-full">0</span></div>
-          <p className="text-[11px] text-slate-400">No pending approvals</p>
-        </div>
-        <div>
           <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2.5">Active guardrails</p>
           <div className="rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 p-4 space-y-3">
             <div>
@@ -590,6 +586,7 @@ interface ChatPageProps {
 
 export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {}) {
   const [storedUserProfile] = useState<UserProfile>(() => {
+    if (propProfile) return propProfile
     try {
       const saved = localStorage.getItem('bambooleaf_user_profile')
       if (saved) return JSON.parse(saved)

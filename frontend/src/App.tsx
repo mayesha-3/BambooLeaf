@@ -12,6 +12,7 @@ import AutonomyPage from './pages/AutonomyPage'
 import WalletPage from './pages/WalletPage'
 import ArenaPage from './pages/ArenaPage'
 import SettingsPage from './pages/SettingsPage'
+import TransactPage from './pages/TransactPage'
 import ChatPage from './features/chat/ChatPage'
 import ComplianceConsole from './pages/ComplianceConsole'
 import PaymentsPage from './pages/PaymentsPage'
@@ -19,6 +20,7 @@ import ProfileDropdown from './components/ProfileDropdown'
 import LiveMarketTicker from './features/market/LiveMarketTicker'
 import { authenticatedFetch } from './lib/device-session'
 
+const validPages: Page[] = ['overview', 'chat', 'activity', 'approvals', 'policy', 'autonomy', 'wallet', 'arena', 'compliance', 'payments', 'settings', 'transact']
 
 const navGroups: { label: string; items: { id: Page; label: string; icon: IconName; count?: string; isChat?: boolean }[] }[] = [
   {
@@ -31,8 +33,9 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: IconNa
     label: 'WORKSPACE',
     items: [
       { id: 'overview', label: 'Overview', icon: 'grid' },
+      { id: 'transact', label: 'Transact', icon: 'send' },
       { id: 'activity', label: 'Activity log', icon: 'activity' },
-      { id: 'approvals', label: 'Approvals', icon: 'check', count: '2' },
+      { id: 'approvals', label: 'Approvals', icon: 'check' },
     ],
   },
   {
@@ -57,13 +60,41 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: IconNa
 ]
 
 function getInitialPage(): Page {
-  const hash = window.location.hash.replace(/^#\/?/, '')
-  const validPages: Page[] = ['overview', 'chat', 'activity', 'approvals', 'policy', 'autonomy', 'wallet', 'arena', 'compliance', 'settings']
-  return (validPages.includes(hash as Page) ? hash : 'chat') as Page
+  if (typeof window !== 'undefined') {
+    const hash = window.location.hash.replace(/^#\/?/, '').trim() as Page
+    if (validPages.includes(hash)) return hash
+    try {
+      const saved = localStorage.getItem('bambooleaf_current_page') as Page
+      if (saved && validPages.includes(saved)) {
+        window.location.hash = `/${saved}`
+        return saved
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return 'chat'
 }
 
 export function App() {
   const [page, setPage] = useState<Page>(getInitialPage)
+
+  // Listen to browser back/forward buttons or direct hash change
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace(/^#\/?/, '').trim() as Page
+      if (validPages.includes(hash)) {
+        setPage(hash)
+        try {
+          localStorage.setItem('bambooleaf_current_page', hash)
+        } catch {
+          // ignore
+        }
+      }
+    }
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showGoalModal, setShowGoalModal] = useState(false)
@@ -74,12 +105,6 @@ export function App() {
   const [isResizingSidebar, setIsResizingSidebar] = useState(false)
   const sidebarResizing = useRef(false)
   const sidebarRef = useRef<HTMLElement>(null)
-
-  useEffect(() => {
-    const handleHashChange = () => setPage(getInitialPage())
-    window.addEventListener('hashchange', handleHashChange)
-    return () => window.removeEventListener('hashchange', handleHashChange)
-  }, [])
 
   // Dark mode theme state
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -244,6 +269,11 @@ export function App() {
   const navigate = (nextPage: Page) => {
     setPage(nextPage)
     if (window.location.hash !== `#/${nextPage}`) window.location.hash = `/${nextPage}`
+    try {
+      localStorage.setItem('bambooleaf_current_page', nextPage)
+    } catch {
+      // ignore
+    }
     setMobileNavOpen(false)
   }
 
@@ -379,8 +409,14 @@ export function App() {
                           </span>
                         )}
                       </div>
-                      {item.count && !sidebarCollapsed && (
-                        <span className="bg-black dark:bg-lime-400 dark:text-slate-950 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
+                      {item.count !== undefined && !sidebarCollapsed && (
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 transition-all duration-200 ${
+                            item.count === '0'
+                              ? 'bg-slate-200/70 dark:bg-slate-800/80 text-slate-400 dark:text-slate-500'
+                              : 'bg-black dark:bg-lime-400 dark:text-slate-950 text-white shadow-sm'
+                          }`}
+                        >
                           {item.count}
                         </span>
                       )}
@@ -587,7 +623,6 @@ export function App() {
                 <OverviewPage
                   onNavigate={navigate}
                   auditState={auditState}
-                  onOpenGoalModal={() => setShowGoalModal(true)}
                   userProfile={userProfile}
                 />
               )}
@@ -599,6 +634,7 @@ export function App() {
               {page === 'arena' && <ArenaPage />}
               {page === 'compliance' && <ComplianceConsole />}
               {page === 'payments' && <PaymentsPage />}
+              {page === 'transact' && <TransactPage onNavigate={navigate} />}
               {page === 'settings' && (
                 <SettingsPage
                   userProfile={userProfile}
@@ -657,6 +693,7 @@ export function App() {
               {[
                 { name: '⚡ Agent Chat — Talk to BambooLeaf', p: 'chat' as Page, keywords: 'chat agent talk bamboo' },
                 { name: 'Overview & Guarded Balance', p: 'overview' as Page, keywords: 'overview dashboard balance home' },
+                { name: '💸 Transact — Manual Send & Swap', p: 'transact' as Page, keywords: 'transact send swap manual transfer' },
                 { name: 'Activity Log & Chain Hashes', p: 'activity' as Page, keywords: 'activity log audit chain hash history' },
                 { name: 'Pending Approvals Queue', p: 'approvals' as Page, keywords: 'approvals pending review queue' },
                 { name: 'Policy & Enforced Limits', p: 'policy' as Page, keywords: 'policy limits cap rules spending' },
