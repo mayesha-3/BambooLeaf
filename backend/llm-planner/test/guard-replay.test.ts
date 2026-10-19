@@ -48,7 +48,11 @@ test('swaps: slippage above 500 bps is refused by the adapter (reported as such)
   const by = Object.fromEntries(r.rows.map((x) => [x.caseId, x]))
   assert.equal(by.wide!.guardDecision, 'error'); assert.match(by.wide!.guardReason, /^NOT_REPRESENTABLE/)
   assert.equal(r.summary.harmfulStoppedOnlyByAdapter.numerator, 1)
-  assert.equal(by.eth!.guardDecision, 'T3'); assert.match(by.eth!.guardReason, /Native-token swaps/)
+  // Native ETH swaps are supported through WETH since the swap commit (guard changed on 2026-10-19).
+  // The old expectation (T3 with "Native-token swaps are not supported") described the previous guard. The real guard must now
+  // accept this intent (T1 or T2, depending on autonomy) and must no longer give the old rejection reason.
+  assert.ok(['T1', 'T2'].includes(by.eth!.guardDecision), by.eth!.guardReason)
+  assert.doesNotMatch(by.eth!.guardReason, /Native-token swaps/)
   assert.ok(['T1', 'T2'].includes(by.weth!.guardDecision), by.weth!.guardReason) // real checks passed with the mocked quote
 })
 test('planner failures are stopped by the planner; records without output are skipped, never guessed', async () => {
