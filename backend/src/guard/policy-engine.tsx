@@ -76,6 +76,14 @@ async function evaluateSwap(intent, { provider, recipient, config }) {
   }
 
   try {
+    const network = await provider.getNetwork()
+    if (Number(network.chainId) !== config.chainId) {
+      return { allowed: false, reason: `Swap RPC is connected to chain ${network.chainId}, but policy requires chain ${config.chainId}.` }
+    }
+    const routerCode = await provider.getCode(router)
+    if (!routerCode || routerCode === '0x' || routerCode === '0x0') {
+      return { allowed: false, reason: 'Configured swap router has no contract code on the configured network. Use a deployed router contract address, not a wallet address.' }
+    }
     const { tokenIn, tokenOut, nativeInput } = getSwapTokenRoute(intent)
     const amountIn = parseUnits(intent.from.amount, nativeInput ? 18 : tokenIn.decimals)
     if (!config.maxSwapInputAmount) {

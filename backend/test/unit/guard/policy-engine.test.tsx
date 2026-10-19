@@ -71,6 +71,8 @@ test('swap policy quotes native ETH through WETH and never sends a zero-address 
       ALLOWED_SWAP_ROUTERS: router,
     })
     const provider = {
+      getNetwork: async () => ({ chainId: 31337n }),
+      getCode: async () => '0x6000',
       call: async (transaction: { data: string }) => {
         const quote = routerInterface.parseTransaction({ data: transaction.data })
         assert.equal(quote?.args[1][0], '0x0000000000000000000000000000000000000011')
@@ -100,4 +102,61 @@ test('swap policy quotes native ETH through WETH and never sends a zero-address 
     if (oldWeth === undefined) delete process.env.TOKEN_WETH_ADDRESS
     else process.env.TOKEN_WETH_ADDRESS = oldWeth
   }
+})
+
+test('swap policy rejects a wallet address configured as a router', async () => {
+  const router = '0x0000000000000000000000000000000000000003'
+  const swapConfig = readPolicyConfig({
+    CHAIN_ID: '31337',
+    MAX_SLIPPAGE_BPS: '100',
+    MAX_SWAP_INPUT_AMOUNT: '10',
+    MAX_SWAP_PER_TOKEN_PER_DAY: '50',
+    SWAP_ROUTER_ADDRESS: router,
+    ALLOWED_SWAP_ROUTERS: router,
+  })
+  const result = await evaluateSwap({
+    intentId: '459daf2c-9a9e-4f38-a8f0-ea09d004957e',
+    action: 'swap',
+    chainId: 31337,
+    from: { token: 'USDC', amount: '1' },
+    to: { token: 'WETH' },
+    maxSlippageBps: 50,
+  }, {
+    provider: {
+      getNetwork: async () => ({ chainId: 31337n }),
+      getCode: async () => '0x',
+    },
+    recipient,
+    config: swapConfig,
+  })
+
+  assert.equal(result.allowed, false)
+  assert.match(result.reason, /no contract code.*wallet address/i)
+})
+
+test('swap policy rejects an RPC connected to a different chain', async () => {
+  const router = '0x0000000000000000000000000000000000000003'
+  const swapConfig = readPolicyConfig({
+    CHAIN_ID: '31337',
+    MAX_SLIPPAGE_BPS: '100',
+    MAX_SWAP_INPUT_AMOUNT: '10',
+    MAX_SWAP_PER_TOKEN_PER_DAY: '50',
+    SWAP_ROUTER_ADDRESS: router,
+    ALLOWED_SWAP_ROUTERS: router,
+  })
+  const result = await evaluateSwap({
+    intentId: '459daf2c-9a9e-4f38-a8f0-ea09d004957e',
+    action: 'swap',
+    chainId: 31337,
+    from: { token: 'USDC', amount: '1' },
+    to: { token: 'WETH' },
+    maxSlippageBps: 50,
+  }, {
+    provider: { getNetwork: async () => ({ chainId: 1n }) },
+    recipient,
+    config: swapConfig,
+  })
+
+  assert.equal(result.allowed, false)
+  assert.match(result.reason, /connected to chain 1.*requires chain 31337/i)
 })

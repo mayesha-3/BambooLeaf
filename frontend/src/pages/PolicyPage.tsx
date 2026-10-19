@@ -60,6 +60,7 @@ function toDraft(policy: PolicySnapshot): PolicyDraft {
 
 function PolicyPage() {
   const [policy, setPolicy] = useState<PolicySnapshot | null>(null)
+  const [trustedRecipientsExpanded, setTrustedRecipientsExpanded] = useState(false)
   const [draft, setDraft] = useState<PolicyDraft>(emptyDraft)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -195,18 +196,39 @@ function PolicyPage() {
           )}
 
           <Card className="p-6">
-            <h2 className="mb-1 text-base font-bold text-slate-900 dark:text-white">Trusted recipients</h2>
-            <p className="mb-4 text-xs text-slate-400">Loaded from active backend policy · {chainLabel}. Verified supplier payouts are added only during verified invoice execution.</p>
-            {policy?.allowedRecipients.length ? (
-              <div className="space-y-3">
-                {policy.allowedRecipients.map((recipient) => (
-                  <div key={recipient} className="flex items-center gap-3 border-t border-slate-100 py-3 first:border-0 dark:border-slate-800/80">
-                    <span className="grid h-8 w-8 place-items-center rounded-xl bg-lime-50 text-[#65A30D] dark:bg-lime-950/50 dark:text-lime-400"><Icon name="checkCircle" size={15} /></span>
-                    <p className="min-w-0 flex-1 break-all font-mono text-xs font-bold text-slate-700 dark:text-slate-200">{recipient}</p>
+            <button
+              type="button"
+              onClick={() => setTrustedRecipientsExpanded((expanded) => !expanded)}
+              aria-expanded={trustedRecipientsExpanded}
+              className="flex w-full items-center justify-between gap-4 text-left"
+            >
+              <span>
+                <span className="block text-base font-bold text-slate-900 dark:text-white">Trusted recipients</span>
+                <span className="mt-1 block text-xs text-slate-400">
+                  {policy?.allowedRecipients.length ?? 0} recipient(s) · Active backend policy · {chainLabel}
+                </span>
+              </span>
+              <Icon
+                name="chevron"
+                size={16}
+                className={`shrink-0 text-slate-400 transition-transform ${trustedRecipientsExpanded ? '-rotate-90' : 'rotate-90'}`}
+              />
+            </button>
+            {trustedRecipientsExpanded && (
+              <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800/80">
+                <p className="mb-2 text-[11px] text-slate-400">Verified supplier payouts are added only during verified invoice execution.</p>
+                {policy?.allowedRecipients.length ? (
+                  <div className="max-h-64 overflow-y-auto">
+                    {policy.allowedRecipients.map((recipient) => (
+                      <div key={recipient} className="flex items-center gap-3 border-t border-slate-100 py-3 first:border-0 dark:border-slate-800/80">
+                        <span className="grid h-8 w-8 place-items-center rounded-xl bg-lime-50 text-[#65A30D] dark:bg-lime-950/50 dark:text-lime-400"><Icon name="checkCircle" size={15} /></span>
+                        <p className="min-w-0 flex-1 break-all font-mono text-xs font-bold text-slate-700 dark:text-slate-200">{recipient}</p>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                ) : <p className="text-xs text-slate-500">No recipients are allow-listed. Transfers will be denied by policy.</p>}
               </div>
-            ) : <p className="text-xs text-slate-500">No recipients are allow-listed. Transfers will be denied by policy.</p>}
+            )}
           </Card>
         </div>
 

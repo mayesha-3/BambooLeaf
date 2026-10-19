@@ -274,11 +274,18 @@ function MessageBubble({ msg, userProfile }: { msg: Message; userProfile?: UserP
         </div>
         {msg.text && <div className={`px-4 py-3 rounded-2xl text-xs leading-relaxed font-medium ${isUser ? 'bg-slate-900 dark:bg-[#84CC16] text-white dark:text-slate-950 rounded-tr-sm' : 'bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 text-slate-800 dark:text-slate-100 shadow-sm rounded-tl-sm'}`}>{msg.text}</div>}
         {msg.untrusted && msg.untrusted.length > 0 && (
-          <div className="mt-1.5 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-[11px] max-w-full">
-            <Icon d={Icons.paperclip} size={12} className="shrink-0" />
-            <span className="font-semibold shrink-0">Attached memo:</span>
-            <span className="truncate italic">{msg.untrusted.join('; ')}</span>
-          </div>
+          <details className="mt-2 w-full max-w-full rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-800 dark:text-amber-300">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-[11px] font-semibold">
+              <Icon d={Icons.paperclip} size={12} className="shrink-0" />
+              <span>Attached memo · {msg.untrusted.length} item{msg.untrusted.length === 1 ? '' : 's'}</span>
+              <span className="ml-auto text-[10px] text-amber-700/70 dark:text-amber-400/70">View</span>
+            </summary>
+            <div className="mx-3 mb-3 max-h-36 overflow-y-auto rounded-lg bg-white/70 p-2.5 text-[11px] leading-relaxed text-slate-700 dark:bg-slate-950/40 dark:text-slate-300">
+              {msg.untrusted.map((item, index) => (
+                <pre key={index} className="whitespace-pre-wrap break-words font-sans">{item}</pre>
+              ))}
+            </div>
+          </details>
         )}
         {msg.toolCalls && msg.toolCalls.length > 0 && <div className="mt-1 px-1"><ToolCallIndicator calls={msg.toolCalls} /></div>}
         {msg.cards?.map((card, i) => <RichCardRenderer key={i} card={card} />)}
@@ -401,7 +408,7 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(180000),
     })
 
     const data = await res.json().catch(() => null) as GoalApiResponse | null
@@ -511,9 +518,12 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
       }
     }
   } catch (error) {
+    const message = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+      ? 'The request took longer than 3 minutes. Check backend logs and planner/RPC availability, then try again.'
+      : error instanceof Error ? error.message : 'Backend unreachable. Please check your server.'
     return {
       id, role: 'agent',
-      text: `⚠ ${error instanceof Error ? error.message : 'Backend unreachable or request timed out. Please check your server.'}`,
+      text: `⚠ ${message}`,
       toolCalls: [{ name: 'network.request()', status: 'failed' as const, detail: 'Connection failed' }],
       ts: new Date(),
     }
@@ -527,7 +537,12 @@ async function getAgentResponse(userText: string, untrusted?: string[]): Promise
   }
 }
 
-const quickPrompts = ['Check my balance', 'Swap 20 USDC to ETH', 'Send 0.01 ETH to 0xe2463837df0a08d3d1728a0cef444a57a879b1dd', 'Show policy limits']
+const quickPrompts = [
+  { label: 'Check balance', prompt: 'Check my balance' },
+  { label: 'Swap 20 USDC → ETH', prompt: 'Swap 20 USDC to ETH' },
+  { label: 'Send 0.01 ETH', prompt: 'Send 0.01 ETH to 0xe2463837df0a08d3d1728a0cef444a57a879b1dd' },
+  { label: 'Show policy limits', prompt: 'Show policy limits' },
+]
 
 interface ChatPageProps {
   userProfile?: UserProfile
@@ -576,17 +591,21 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
 
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [showQuickPrompts, setShowQuickPrompts] = useState(false)
   const [showAttachment, setShowAttachment] = useState(false)
   const [attachmentText, setAttachmentText] = useState('')
   const [attachmentFileName, setAttachmentFileName] = useState('')
   const [attachmentError, setAttachmentError] = useState('')
   const [contextPanelWidth, setContextPanelWidth] = useState(280)
   const contextResizing = useRef(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isTyping])
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (container) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
+  }, [messages, isTyping])
 
   const handleContextResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -620,6 +639,11 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
     const attachmentContent = attachmentFileName
       ? `Attached file: ${attachmentFileName}\n${untrustedTrimmed}`
       : untrustedTrimmed
+    if (attachmentContent.length > 4000) {
+      setAttachmentError('Memo text must be no more than 4,000 characters. Shorten the memo before sending.')
+      setShowAttachment(true)
+      return
+    }
     const untrustedList = attachmentContent ? [attachmentContent] : undefined
 
     setMessages(prev => [...prev, {
@@ -642,11 +666,15 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
 
   function handleSubmit(e: FormEvent) { e.preventDefault(); send(input) }
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input) } }
+  function selectQuickPrompt(prompt: string) {
+    setInput(prompt)
+    inputRef.current?.focus()
+  }
 
   async function handleAttachmentFile(file?: File) {
     if (!file) return
-    if (file.size > 16 * 1024) {
-      setAttachmentError('Choose a text file no larger than 16 KB, or paste the relevant invoice text.')
+    if (file.size > 4 * 1024) {
+      setAttachmentError('Choose a text file no larger than 4 KB, or paste the relevant invoice text.')
       return
     }
     if (!/\.(txt|md|csv|json)$/i.test(file.name)) {
@@ -655,6 +683,14 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
     }
     try {
       const content = await file.text()
+      if (!content.trim()) {
+        setAttachmentError('The selected file is empty. Choose a file with memo or invoice text.')
+        return
+      }
+      if (`Attached file: ${file.name}\n${content.trim()}`.length > 4000) {
+        setAttachmentError('The file text and filename must fit within 4,000 characters. Please shorten it or paste only the relevant details.')
+        return
+      }
       setAttachmentText(content)
       setAttachmentFileName(file.name)
       setAttachmentError('')
@@ -664,53 +700,91 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
   }
 
   return (
-    <div className="flex h-full overflow-hidden bg-[#FBFBFC] dark:bg-[#090e1a] transition-colors">
-      <div className="flex flex-col flex-1 h-full min-w-0">
-        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 space-y-5">
+    <div className="flex h-full min-h-0 overflow-hidden bg-[#FBFBFC] dark:bg-[#090e1a] transition-colors">
+      <div className="flex flex-col flex-1 min-h-0 min-w-0">
+        <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-6 space-y-5">
           {messages.map(msg => <MessageBubble key={msg.id} msg={msg} userProfile={userProfile} />)}
           {isTyping && <TypingIndicator />}
-          <div ref={bottomRef} />
         </div>
-        <div className="border-t border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0c1220] px-4 sm:px-6 py-4 space-y-3 transition-colors">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap gap-2">
-              {quickPrompts.map(p => (
-                <button key={p} onClick={() => send(p)} disabled={isTyping} className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-full px-3 py-1.5 hover:border-[#84CC16] hover:text-[#65A30D] dark:hover:text-lime-400 transition disabled:opacity-50">{p}</button>
-              ))}
-            </div>
+        <div className="shrink-0 border-t border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0c1220] px-4 sm:px-6 py-3 space-y-2.5 transition-colors">
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => setShowQuickPrompts((visible) => !visible)}
+              aria-expanded={showQuickPrompts}
+              aria-controls="chat-quick-prompts"
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            >
+              Suggested prompts
+              <Icon d={<path d="m9 18 6-6-6-6" />} size={12} className={`transition-transform ${showQuickPrompts ? 'rotate-90' : '-rotate-90'}`} />
+            </button>
             <button
               type="button"
               onClick={() => {
                 setShowAttachment((prev) => !prev)
                 setAttachmentError('')
               }}
-              className={`inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-3 py-1.5 transition ${showAttachment ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 border border-dashed border-slate-300 dark:border-slate-700'}`}
+              aria-expanded={showAttachment}
+              aria-controls="chat-memo-panel"
+              className={`inline-flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-semibold transition ${showAttachment || attachmentText ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300' : 'border-dashed border-slate-300 text-slate-500 hover:border-amber-300 hover:text-amber-800 dark:border-slate-700 dark:text-slate-400 dark:hover:text-amber-300'}`}
             >
               <Icon d={Icons.paperclip} size={12} />
-              {showAttachment ? 'Close memo' : 'Attach invoice / memo'}
+              <span className="truncate">{attachmentText ? (showAttachment ? 'Edit attached memo' : 'Memo attached · edit') : (showAttachment ? 'Close memo editor' : 'Add invoice / memo')}</span>
             </button>
+            {attachmentText && (
+              <span className="hidden truncate text-[10px] text-slate-500 dark:text-slate-400 sm:inline" title={attachmentFileName || 'Pasted memo'}>
+                {attachmentFileName || `${attachmentText.trim().length.toLocaleString()} characters`}
+              </span>
+            )}
           </div>
 
-          {showAttachment && (
-            <div className="rounded-2xl border border-amber-500/30 bg-amber-50/60 dark:bg-amber-950/20 p-3.5 space-y-2 animate-in fade-in duration-200">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
-                  <Icon d={Icons.shield} size={13} className="text-amber-600 dark:text-amber-400" />
-                  Untrusted Content · Inspected by Quarantine
-                </span>
-                <button type="button" onClick={() => { setShowAttachment(false); setAttachmentText(''); setAttachmentFileName(''); setAttachmentError('') }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold">
-                  ✕ Cancel
+          {showQuickPrompts && (
+            <div id="chat-quick-prompts" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {quickPrompts.map(({ label, prompt }) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  title={prompt}
+                  onClick={() => selectQuickPrompt(prompt)}
+                  className="min-w-0 truncate rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-[11px] font-semibold text-slate-600 transition hover:border-[#84CC16] hover:text-[#65A30D] dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:text-lime-400"
+                >
+                  {label}
                 </button>
+              ))}
+            </div>
+          )}
+
+          {showAttachment && (
+            <div id="chat-memo-panel" className="space-y-3 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-3.5 shadow-sm dark:border-amber-900/60 dark:from-amber-950/30 dark:to-slate-900 animate-in fade-in duration-200">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2">
+                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
+                    <Icon d={Icons.shield} size={14} />
+                  </span>
+                  <div>
+                    <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{attachmentText ? 'Invoice / memo attached' : 'Add invoice or memo'}</p>
+                    <p className="mt-0.5 text-[10px] leading-relaxed text-slate-600 dark:text-slate-400">This text is untrusted and will be checked before the agent plans your request.</p>
+                  </div>
+                </div>
+                {attachmentText && (
+                  <button
+                    type="button"
+                    onClick={() => { setAttachmentText(''); setAttachmentFileName(''); setAttachmentError('') }}
+                    className="shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950/40"
+                  >
+                    Remove memo
+                  </button>
+                )}
               </div>
               <textarea
                 value={attachmentText}
                 onChange={e => { setAttachmentText(e.target.value); setAttachmentFileName('') }}
-                placeholder="Paste invoice text, memo, or external payment details to be inspected before planning..."
-                rows={2}
-                maxLength={6000}
-                className="w-full resize-none rounded-xl border border-amber-200/80 dark:border-amber-900/60 bg-white dark:bg-slate-900 p-2.5 text-xs font-mono text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                placeholder="Paste invoice details, payment reference, or context for your request…"
+                rows={3}
+                maxLength={4000}
+                className="w-full resize-y rounded-xl border border-amber-200 bg-white p-3 text-xs leading-relaxed text-slate-800 placeholder:text-slate-400 shadow-inner focus:border-amber-400 focus:outline-none focus:ring-4 focus:ring-amber-500/10 dark:border-amber-900/70 dark:bg-slate-950/60 dark:text-slate-100 dark:placeholder:text-slate-500"
               />
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <input
                   ref={attachmentInputRef}
                   type="file"
@@ -721,16 +795,13 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
                 <button
                   type="button"
                   onClick={() => attachmentInputRef.current?.click()}
-                  className="rounded-full border border-amber-300 px-3 py-1.5 text-[10px] font-bold text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950/60"
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-[10px] font-bold text-amber-900 transition hover:bg-amber-100 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-300 dark:hover:bg-amber-950/60"
                 >
                   Choose text file
                 </button>
-                {attachmentFileName && <span className="max-w-full truncate text-[10px] font-semibold text-amber-900 dark:text-amber-300">{attachmentFileName}</span>}
+                <span className="text-[10px] tabular-nums text-slate-500 dark:text-slate-400">{attachmentText.length.toLocaleString()} / 4,000 characters</span>
               </div>
               {attachmentError && <p role="alert" className="text-[10px] font-semibold text-rose-700 dark:text-rose-300">{attachmentError}</p>}
-              <p className="text-[10px] text-amber-800/80 dark:text-amber-400/80 font-medium">
-                File text and pasted content are untrusted and inspected by quarantine before planning. Maximum file size: 16 KB.
-              </p>
             </div>
           )}
 
