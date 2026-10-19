@@ -33,13 +33,13 @@ Main implementation references: [goals service](../backend/src/services/goals.se
 2. The planner/quarantine pipeline returns a strict intent or a typed failure. Raw outside text must not be treated as owner instructions or used to ground a recipient.
 3. The guard checks chain, action, token, recipient/router allowlists, caps, slippage, and autonomy tier.
 4. Usage limits are reserved before execution.
-5. T2 native transfers require an owner decision on a short-lived digest-bound approval.
+5. T2 native transfers and swaps require an authorized decision on a short-lived digest-bound approval.
 6. The signer rechecks current policy, chain, nonce, authorization expiry, kill-switch state, and transaction digest immediately before submission.
 7. A successful receipt and relevant decisions are written to the audit trail.
 
-**Currently supported signing:** native ETH transfers on the configured chain, subject to the allowlist, caps, tier, and signer configuration. ERC-20 transfers and read-only intents are not currently supported by the native-transfer signer path. Swaps are implemented as a separate ERC-20 path but remain fail-closed unless a compatible router is configured and allow-listed, token addresses/caps are configured, a quote and shadow-fork simulation pass, and the current tier is T1. Native ETH↔token swap/unwrap is not supported by the current transaction builder; ERC-20-to-ERC-20 swaps (for example, WETH/USDC) are the intended shape.
+**Currently supported signing:** native ETH transfers on the configured chain, subject to the allowlist, caps, tier, and signer configuration. ERC-20 transfers and read-only intents are not currently supported by the native-transfer signer path. Swaps fail closed unless a compatible router is configured and allow-listed, token addresses/caps are configured, and quote and shadow-fork checks pass. T1 swaps execute automatically; T2 swaps enter the approval queue and execute only after an authorized approval; T3 swaps are denied. The transaction builder supports ERC-20-to-ERC-20 swaps and native ETH↔token swaps through WETH. These capabilities still depend on deployment configuration and have not, by themselves, been verified on a live chain.
 
-**Human approvals:** current approval tickets cover native ETH transfers only. Approval binds chain ID, destination, value, calldata, nonce, and expiry. Tickets expire after two minutes and can be claimed once. The configured owner wallet must match the authenticated device-session wallet. A swap requiring T2 is held; swap approval execution is not implemented.
+**Human approvals:** approval tickets cover native ETH transfers and swaps. Tickets bind the transaction parameters, chain, nonce, and expiry, and expire after two minutes. Swap approvals also recheck current policy, token allowance, and transaction digest, then repeat the shadow-fork simulation before signing. Tickets can be claimed once; approval actions require an authorized admin/approver session.
 
 **Compliance Console:** read-only API access is granted to the configured owner or wallets in `AUDITOR_WALLET_ADDRESSES` (comma-separated). Both must first authenticate through the wallet device-session flow. The console supports decision/tier/layer/date filtering, JSON/CSV export, full-chain verification, autonomy history, and backend-startup policy snapshots. Policy snapshots capture only effective wallet policy settings; they do not change policy. No policy mutation or maker-checker API is implemented.
 
@@ -91,8 +91,8 @@ The following are the recorded offline/live-planner artifacts currently availabl
 ## Known risks and limitations
 
 1. **Read-only goal routing:** balance/policy queries can currently reach the transfer guard and be denied as unsupported. Route read-only actions separately before claiming these flows work.
-2. **Swap configuration and capability:** swaps fail closed without a deployment-specific allowlisted router and token/cap settings. The current environment must be configured deliberately; do not copy an arbitrary router address into the allowlist. Native-output swaps require an unwrap-capable implementation and additional tests.
-3. **Approval scope:** native transfers only. Swaps requiring approval do not execute.
+2. **Swap configuration and capability:** swaps fail closed without a deployment-specific allowlisted router and token/cap settings. The current environment must be configured deliberately; do not copy an arbitrary router address into the allowlist. Live-chain swap execution still requires independent validation with a test signer and configured shadow fork.
+3. **Approval execution:** T2 swap execution is implemented after authorized approval, with policy, allowance, nonce/digest, and simulation rechecks; live-chain end-to-end behavior still needs independent verification.
 4. **Live end-to-end evidence gap:** current planner and replay metrics do not prove on-chain safety. Sepolia transactions, their hashes, and the complete Anvil gate need independent verification.
 5. **Provider dependence:** model/quarantine output and availability are external dependencies; injection detection is probabilistic. The deterministic guard is the security boundary.
 6. **Persistence/operations:** MongoDB availability and correct deployment configuration are required for audit, approvals, and autonomy persistence. Hash-linked audit records are not an external append-only ledger.

@@ -16,7 +16,7 @@ services:
       - key: TRUST_PROXY_HOPS
         value: 1
       - key: FRONTEND_ORIGIN
-        sync: false
+        value: https://bamboo-leaf.vercel.app
       - key: MONGODB_URI
         sync: false
       - key: MONGODB_DB_NAME
