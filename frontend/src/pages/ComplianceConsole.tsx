@@ -131,7 +131,9 @@ export default function ComplianceConsole() {
       if (!wallet) throw new Error('No browser wallet was found.')
       const result = await enrollOrLoginDevice(wallet)
       if (result.status === 'pending' || !result.token) {
-        throw new Error('This device is pending admin approval. Sign in after it is approved.')
+        setError('This wallet’s device access request is pending admin approval. It will remain pending until an admin approves it.')
+        setLoading(false)
+        return
       }
       setToken(result.token)
     } catch (connectError) {

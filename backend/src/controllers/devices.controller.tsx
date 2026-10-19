@@ -94,6 +94,21 @@ function validDeviceId(value) {
   return typeof value === 'string' && deviceIdPattern.test(value)
 }
 
+function deviceLoginState(device, walletAddress) {
+  if (!device || device.status === 'revoked' || device.revokedAt) return 'unavailable'
+  if (device.status === 'approved') return 'approved'
+  if (device.status === 'pending') {
+    return walletRole(walletAddress) === 'admin' ? 'owner-pending' : 'pending'
+  }
+  return 'unavailable'
+}
+
+function enrollmentStatus(walletAddress, existingDevice) {
+  return walletRole(walletAddress) === 'admin' || existingDevice?.status === 'approved'
+    ? 'approved'
+    : 'pending'
+}
+
 async function findBlock(database, walletAddress, deviceId, ip) {
   return database.collection(COLLECTIONS.deviceBlocks).findOne({
     walletAddress,
@@ -139,21 +154,33 @@ async function getChallenge(request, response, next) {
       response.status(403).json({ error: 'This device or IP address is blocked for this wallet.' })
       return
     }
-    const device = await database.collection(COLLECTIONS.devices).findOne({
-      walletAddress,
-      deviceId,
-      status: 'approved',
-      revokedAt: { $exists: false },
-    })
-    if (!device) {
+    const device = await database.collection(COLLECTIONS.devices).findOne({ walletAddress, deviceId })
+    const loginState = deviceLoginState(device, walletAddress)
+    if (loginState === 'pending') {
+      await recordAttempt(database, {
+        walletAddress,
+        deviceId,
+        request,
+        status: 'pending',
+        reason: 'Device enrollment is awaiting admin approval',
+      })
+      response.status(202).json({
+        status: 'pending',
+        message: 'This wallet’s device enrollment is awaiting admin approval.',
+      })
+      return
+    }
+    if (loginState === 'unavailable') {
       await recordAttempt(database, {
         walletAddress,
         deviceId,
         request,
         status: 'blocked',
-        reason: 'Device enrollment is pending admin approval',
+        reason: device ? 'Device is revoked or unavailable' : 'Device is not enrolled',
       })
-      response.status(403).json({ error: 'This device must be approved by an admin before sign-in.' })
+      response.status(403).json({
+        error: device ? 'This device has been revoked or is unavailable.' : 'This device is not enrolled.',
+      })
       return
     }
 
@@ -277,6 +304,29 @@ async function login(request, response, next) {
       return
     }
 
+    const device = await database.collection(COLLECTIONS.devices).findOne({ walletAddress, deviceId })
+    const loginState = deviceLoginState(device, walletAddress)
+    if (loginState === 'pending') {
+      await updateAttempt(database, challenge.attemptId, walletAddress, deviceId, {
+        status: 'pending',
+        reason: 'Device enrollment is awaiting admin approval',
+      })
+      response.status(202).json({
+        status: 'pending',
+        message: 'This wallet’s device enrollment is awaiting admin approval.',
+      })
+      return
+    }
+    if (loginState === 'unavailable') {
+      await updateAttempt(database, challenge.attemptId, walletAddress, deviceId, {
+        status: 'blocked',
+        reason: 'Device was revoked or became unavailable during sign-in',
+      })
+      response.status(403).json({ error: 'This device has been revoked or is unavailable.' })
+      return
+    }
+    const approveOwnerDevice = loginState === 'owner-pending'
+
     const accounts = database.collection(COLLECTIONS.deviceAccounts)
     let account = await accounts.findOne({ walletAddress })
     if (!account) {
@@ -293,6 +343,34 @@ async function login(request, response, next) {
       }
     }
     const isPrimary = account.primaryDeviceId === deviceId
+    const deviceUpdate = await database.collection(COLLECTIONS.devices).updateOne(
+      {
+        walletAddress,
+        deviceId,
+        status: approveOwnerDevice ? 'pending' : 'approved',
+        revokedAt: { $exists: false },
+      },
+      {
+        $set: {
+          isPrimary,
+          lastSuccessfulLoginAt: new Date(),
+          ...(approveOwnerDevice ? {
+            status: 'approved',
+            approvedAt: new Date(),
+            approvedBy: 'owner-wallet-signature',
+          } : {}),
+        },
+        $unset: { lockedUntil: '' },
+      },
+    )
+    if (deviceUpdate.modifiedCount !== 1) {
+      await updateAttempt(database, challenge.attemptId, walletAddress, deviceId, {
+        status: 'blocked',
+        reason: 'Device was revoked or changed during sign-in',
+      })
+      response.status(403).json({ error: 'This device has been revoked or is unavailable.' })
+      return
+    }
     const token = randomBytes(32).toString('base64url')
     const expiresAt = new Date(Date.now() + sessionLifetimeMs)
     await database.collection(COLLECTIONS.deviceSessions).insertOne({
@@ -307,10 +385,6 @@ async function login(request, response, next) {
       status: 'success',
       reason: '',
     })
-    await database.collection(COLLECTIONS.devices).updateOne(
-      { walletAddress, deviceId },
-      { $set: { isPrimary, lastSuccessfulLoginAt: new Date() }, $unset: { lockedUntil: '' } },
-    )
     response.json({
       token,
       walletAddress,
@@ -412,19 +486,20 @@ async function enrollDevice(request, response, next) {
     }
     const now = new Date()
     const details = getRequestDetails(request)
-    const adminExists = await database.collection(COLLECTIONS.devices).findOne({
-      status: 'approved',
-      walletAddress: { $in: process.env.OWNER_WALLET_ADDRESS ? [getAddress(process.env.OWNER_WALLET_ADDRESS).toLowerCase()] : [] },
-    })
-    const bootstrapAdmin = walletRole(walletAddress) === 'admin' && !adminExists
-    const status = bootstrapAdmin ? 'approved' : 'pending'
+    const existingDevice = await database.collection(COLLECTIONS.devices).findOne({ walletAddress, deviceId })
+    if (existingDevice?.status === 'revoked' || existingDevice?.revokedAt) {
+      response.status(403).json({ error: 'A revoked device cannot be enrolled again.' })
+      return
+    }
+    const status = enrollmentStatus(walletAddress, existingDevice)
+    const ownerWallet = walletRole(walletAddress) === 'admin'
     await database.collection(COLLECTIONS.devices).updateOne(
       { walletAddress, deviceId, status: { $ne: 'revoked' } },
       {
         $setOnInsert: { walletAddress, deviceId, firstSeenAt: now },
         $set: {
           status,
-          ...(bootstrapAdmin ? { approvedAt: now, approvedBy: 'owner-wallet-bootstrap' } : {}),
+          ...(ownerWallet ? { approvedAt: now, approvedBy: 'owner-wallet-signature' } : {}),
           publicKey,
           ip: details.ip,
           browser: details.browser,
@@ -434,6 +509,7 @@ async function enrollDevice(request, response, next) {
           lastSeenAt: now,
           descriptiveOnly: true,
         },
+        ...(status === 'approved' ? { $unset: { revokedAt: '' } } : {}),
         $addToSet: { observedIps: details.ip },
       },
       { upsert: true },
@@ -442,12 +518,12 @@ async function enrollDevice(request, response, next) {
       walletAddress,
       deviceId,
       request,
-      status: 'pending',
-      reason: 'Device key registered; awaiting admin approval',
-    })
-    response.status(bootstrapAdmin ? 201 : 202).json({
       status,
-      message: bootstrapAdmin ? 'Initial admin device enrolled.' : 'Device registration is pending admin approval.',
+      reason: status === 'pending' ? 'Device key registered; awaiting admin approval' : 'Owner wallet and device key verified',
+    })
+    response.status(status === 'approved' ? 201 : 202).json({
+      status,
+      message: status === 'approved' ? 'Owner device enrolled and approved.' : 'Device registration is pending admin approval.',
     })
   } catch (error) {
     next(error)
@@ -615,7 +691,9 @@ async function updateBlock(request, response, next) {
 
 export {
   cancelChallenge,
+  deviceLoginState,
   enrollDevice,
+  enrollmentStatus,
   getChallenge,
   getEnrollmentChallenge,
   listDevices,

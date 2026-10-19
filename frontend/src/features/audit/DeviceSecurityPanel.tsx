@@ -62,6 +62,7 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
   const [newWalletAddress, setNewWalletAddress] = useState('')
   const [newWalletRole, setNewWalletRole] = useState('clerk')
   const [error, setError] = useState('')
+  const [pendingApproval, setPendingApproval] = useState(false)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -130,13 +131,14 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
   const connectWallet = async () => {
     setBusy(true)
     setError('')
+    setPendingApproval(false)
     try {
       const wallet = (window as Window & { ethereum?: InjectedWallet }).ethereum
       if (!wallet) throw new Error('No browser wallet was found. Install or unlock a wallet extension and try again.')
       const result = await enrollOrLoginDevice(wallet)
       setDeviceId(result.deviceId)
       if (result.status === 'pending') {
-        setError('This device key is registered and pending admin approval. Sign in after an admin approves it.')
+        setPendingApproval(true)
         return
       }
       setToken(result.token || '')
@@ -296,9 +298,15 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
         </p>
       )}
 
+      {pendingApproval && (
+        <p role="status" aria-live="polite" className="mx-6 mt-4 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+          This wallet’s device access request is pending admin approval. It will remain pending until an admin approves it.
+        </p>
+      )}
+
       {!token ? (
         <p className="px-6 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
-          Enroll this browser key with your wallet. New devices remain pending until an admin approves them.
+          Verify your wallet to enroll this browser key. The configured owner wallet is approved by its wallet signature; other wallets’ devices wait for admin approval.
         </p>
       ) : (
         <div className="space-y-6 p-6">

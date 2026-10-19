@@ -79,11 +79,14 @@ export async function enrollOrLoginDevice(
   const keys = await getDeviceKeys()
   const id = keys.deviceId
 
-  const challengeResponse = await fetch(`${apiBaseUrl}/devices/challenge`, {
+  let challengeResponse = await fetch(`${apiBaseUrl}/devices/challenge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ walletAddress, deviceId: id }),
   })
+  if (challengeResponse.status === 202) {
+    return { status: 'pending', walletAddress, deviceId: id }
+  }
   if (challengeResponse.status === 403) {
     const enrollmentChallenge = await readResponse<{ nonce: string; message: string }>(await fetch(`${apiBaseUrl}/devices/enrollment/challenge`, {
       method: 'POST',
@@ -96,7 +99,7 @@ export async function enrollOrLoginDevice(
     })
     if (typeof walletSignature !== 'string') throw new Error('Wallet returned an invalid enrollment signature.')
     const deviceSignature = await signMessage(enrollmentChallenge.message, keys.privateKey)
-    await readResponse(await fetch(`${apiBaseUrl}/devices/enrollment`, {
+    const enrollment = await readResponse<{ status: 'pending' | 'approved' }>(await fetch(`${apiBaseUrl}/devices/enrollment`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -108,7 +111,14 @@ export async function enrollOrLoginDevice(
         publicKey: keys.publicKey,
       }),
     }))
-    return { status: 'pending', walletAddress, deviceId: id }
+    if (enrollment.status === 'pending') return { status: 'pending', walletAddress, deviceId: id }
+    if (enrollment.status !== 'approved') throw new Error('The backend returned an invalid device enrollment status.')
+    challengeResponse = await fetch(`${apiBaseUrl}/devices/challenge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress, deviceId: id }),
+    })
+    if (challengeResponse.status === 202) return { status: 'pending', walletAddress, deviceId: id }
   }
 
   const challenge = await readResponse<{ nonce: string; message: string }>(challengeResponse)

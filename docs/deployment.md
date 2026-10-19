@@ -9,6 +9,7 @@ BambooLeaf deploys as two services: the Express API on Render and the Vite front
    - `MONGODB_URI`: MongoDB connection string. Ensure the database allows connections from Render.
    - `MONGODB_DB_NAME`: database name.
    - `FRONTEND_ORIGIN`: the Vercel frontend origin, `https://bamboo-leaf.vercel.app` (no path or trailing slash). The Render Blueprint sets this value; if you manage the service outside the Blueprint, set it in the Render dashboard. Separate multiple allowed origins with commas.
+   - `OWNER_WALLET_ADDRESS`: the exact main-owner wallet address. The backend uses this Render environment variable to identify the admin wallet; a local `.env` or Vercel variable does not configure the backend.
 3. Add any application-specific secrets or settings your deployment needs in the Render service's environment settings. For example, configure `RPC_URL`, `CHAIN_ID`, and `AGENT_KEY` only when enabling blockchain operations, and configure provider API keys if using an LLM provider. Keep private keys and API keys in Render, never in the frontend.
 4. After deployment, verify the service's `/health` endpoint returns `{"status":"ok"}`.
 
