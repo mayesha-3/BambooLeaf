@@ -294,4 +294,11 @@ Work on a branch, open a pull request into `main`, and never commit `.env` files
 
 ## Contributors
 
-From the git history: Fabi (AI planner and quarantine, evaluation), Araf, Mayesha, StarryNeerzykins.
+This project was built as a collaborative effort by:
+
+| Name | Role | GitHub |
+| :--- | :--- | :--- |
+| **Mayesha Afraoz** | Security Lead | [@mayesha-3](https://github.com/mayesha-3) |
+| **Hosaina Jabara Razty** | Security & Blockchain | [@404Kin](https://github.com/404Kin) |
+| **Fabiya Anjum** | AI Engineer | [@FabiZzzCode](https://github.com/FabiZzzCode) |
+| **Mohammad Araf** | Full Stack | [@Araf1011](https://github.com/Araf1011) |
