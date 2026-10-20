@@ -283,7 +283,7 @@ The API deploys to Render (`render.yaml`) and the frontend to Vercel (`frontend/
 
 - **Supported on-chain actions are narrow:** native ETH transfers to allow-listed recipients, and token swaps through one configured allow-listed router (native ETH goes through WETH). ERC-20 transfers are not supported.
 - **Balance requests** ("what is my balance?") are handled, but they read through the signer wallet, so they fail when `AGENT_KEY` is empty. `read_quote` is not handled yet.
-- **Swap approvals** exist in code and unit tests but have not been verified end to end on a live chain.
+- **Swap approvals** Swap approvals exist in code and unit tests. Live Sepolia swaps are not fully verified end-to-end via the UI, but the underlying routing, quoting, and execution logic successfully pass offline simulation tests using a local Anvil shadow fork.
 - **Model dependence:** injection detection is probabilistic. The deterministic guard is the security boundary, and provider outages make requests fail closed.
 - **Operations:** MongoDB is required; the audit chain detects tampering but is not an external immutable ledger.
 - Some docs under `docs/` are still stubs.
