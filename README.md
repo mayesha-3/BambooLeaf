@@ -6,6 +6,14 @@ BambooLeaf is a **guarded AI wallet**. You type what you want in plain language 
 
 ---
 
+## Live Deployments
+
+* **Frontend (Vercel):** https://bamboo-leaf.vercel.app/ 
+
+* **Backend API (Render):** https://bambooleaf.onrender.com/ 
+
+---
+
 ## How it works
 
 ```text
@@ -146,13 +154,6 @@ For detailed information, see the [docs folder](./docs/).
 
 ---
 
-## Live Deployments
-
-* **Frontend (Vercel):** https://bamboo-leaf.vercel.app/ 
-
-* **Backend API (Render):** https://bambooleaf.onrender.com/ 
-
----
 
 ## How It Works
 
