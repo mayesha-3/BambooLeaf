@@ -164,7 +164,7 @@ React 19 UI
 ### 1. Clone & Install Dependencies
 
 ```bash
-git clone https://github.com/your-org/bambooleaf.git
+git clone https://github.com/mayesha-3/BambooLeaf.git
 cd bambooleaf
 
 cd backend && npm ci
