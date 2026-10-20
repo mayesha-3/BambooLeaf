@@ -48,8 +48,20 @@ export function defaultPolicyEnv(allowedRecipients: string[]): Record<string, st
   }
 }
 
-/** The ONLY mocked thing: the router quote that the real guard would fetch over RPC. */
-const mockProvider = { call: async () => AbiCoder.defaultAbiCoder().encode(['uint256[]'], [[1n, 1_000_000n]]) }
+/**
+ * The ONLY mocked things: the three RPC reads the real guard makes for a swap.
+ *  - call:       the router quote (getAmountsOut)
+ *  - getNetwork: the chain the RPC is on (set to the policy chain, so the guard's chain check passes)
+ *  - getCode:    "the router address is a deployed contract" (the guard rejects an address with no code)
+ * getNetwork and getCode were added to the guard on 2026-10-19 ("validate swap configuration").
+ */
+function makeMockProvider(chainId: number) {
+  return {
+    call: async () => AbiCoder.defaultAbiCoder().encode(['uint256[]'], [[1n, 1_000_000n]]),
+    getNetwork: async () => ({ chainId: BigInt(chainId) }),
+    getCode: async () => '0x60806040',
+  }
+}
 
 export type Outcome = 'stopped_by_planner' | 'stopped_by_guard' | 'would_execute'
 export interface Row {
@@ -98,7 +110,7 @@ export async function replayRecords(records: RunRecord[], cases: Map<string, Eva
         if (!parsed.success) {
           row.guardReason = `guard intent schema rejected: ${parsed.error!.issues.map((x) => `${x.path.join('.') || '(root)'} ${x.message}`).join('; ')}`
         } else if (gi.action === 'swap') {
-          const d = await guard.evaluateSwap(gi, { provider: mockProvider, recipient: SIGNER, config })
+          const d = await guard.evaluateSwap(gi, { provider: makeMockProvider(config.chainId), recipient: SIGNER, config })
           if (!d.allowed) { row.guardDecision = 'T3'; row.guardReason = d.reason }
           else {
             const cap = parseUnits(config.maxSwapInputAmount, guard.getToken(gi.from.token, gi.chainId).decimals)

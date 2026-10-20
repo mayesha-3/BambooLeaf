@@ -136,7 +136,7 @@ npm run dev
 
 Planner evaluation commands are in the [planner README](../backend/llm-planner/README.md). Live commands require configured provider credentials and may consume quota. Only run transaction tests against a disposable Anvil/fork setup and a test signer; do not use a funded production key.
 
-## Handoff TODO before final claims
+## Handoff TODO before final claims (Done and Dusted )
 
 - Run backend, planner, and frontend commands from a **fresh clone** and save command output.
 - Confirm all example configuration fields required by the active API and chosen chain are documented; verify router/token addresses against authoritative deployment sources.
@@ -146,3 +146,4 @@ Planner evaluation commands are in the [planner README](../backend/llm-planner/R
 - Only run Sepolia transfers with explicit authorization and a test signer; independently verify every transaction hash.
 - Run secret scanning on tracked files and git history; record the tool, scope, and result.
 - Freeze prompt/model configuration and capture final docs, deck, and video only after the tested build is stable.
+

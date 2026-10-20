@@ -53,6 +53,7 @@ type InjectedWallet = {
 }
 
 function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: string; onAuthenticated?: () => void }) {
+  const [expanded, setExpanded] = useState(false)
   const [deviceId, setDeviceId] = useState('')
   const [token, setToken] = useState('')
   const [snapshot, setSnapshot] = useState<DeviceSnapshot | null>(null)
@@ -262,15 +263,29 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
   return (
     <section className="mt-6 overflow-hidden rounded-3xl border border-slate-100/90 dark:border-slate-800/80 bg-white dark:bg-[#0f172a] shadow-sm text-slate-900 dark:text-slate-100 transition-colors duration-200" aria-labelledby="device-security-heading">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800/80 px-6 py-5">
-        <div>
-          <h2 id="device-security-heading" className="text-sm font-bold text-slate-900 dark:text-white">Devices & sign-in attempts</h2>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500 dark:text-slate-400">
-            A non-extractable browser key and wallet signature prove device enrollment. Browser, OS, and observed IP are descriptive only—not proof of identity.
-          </p>
-          <p className="mt-1 max-w-3xl text-[11px] leading-5 text-slate-400">
-            If IP shows 127.0.0.1 or ::1, the app is seeing local loopback (common when the backend runs on this computer), not your public IP. Behind a reverse proxy, configure TRUST_PROXY_HOPS to match only your trusted proxy chain.
-          </p>
-        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+          aria-controls="device-security-content"
+          className="flex min-w-0 flex-1 items-start justify-between gap-4 text-left"
+        >
+          <span>
+            <span id="device-security-heading" className="block text-sm font-bold text-slate-900 dark:text-white">Devices & sign-in attempts</span>
+            <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+              Manage enrolled devices, wallet access, and sign-in activity.
+            </span>
+          </span>
+          <svg
+            className={`mt-1 h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2.5}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
         {token ? (
           <button
             type="button"
@@ -304,12 +319,14 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
         </p>
       )}
 
-      {!token ? (
-        <p className="px-6 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
-          Verify your wallet to enroll this browser key. The configured owner wallet is approved by its wallet signature; other wallets’ devices wait for admin approval.
-        </p>
-      ) : (
-        <div className="space-y-6 p-6">
+      {expanded && (
+        <div id="device-security-content">
+          {!token ? (
+            <p className="px-6 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
+              Verify your wallet to enroll this browser key. The configured owner wallet is approved by its wallet signature; other wallets’ devices wait for admin approval.
+            </p>
+          ) : (
+            <div className="space-y-6 p-6">
           {snapshot && (
             <>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -481,6 +498,11 @@ function DeviceSecurityPanel({ apiBaseUrl, onAuthenticated }: { apiBaseUrl: stri
             </>
           )}
           {!snapshot && <p className="text-xs text-slate-500 dark:text-slate-400">Loading device records…</p>}
+            </div>
+          )}
+          <p className="border-t border-slate-100 px-6 py-3 text-[11px] leading-relaxed text-slate-400 dark:border-slate-800/80">
+            A non-extractable browser key and wallet signature prove device enrollment. Browser, OS, and observed IP are descriptive only—not proof of identity. Loopback IPs (127.0.0.1 or ::1) are local; behind a reverse proxy, configure TRUST_PROXY_HOPS to match only your trusted proxy chain.
+          </p>
         </div>
       )}
     </section>

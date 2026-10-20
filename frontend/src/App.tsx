@@ -949,13 +949,13 @@ export function App() {
 
         </header>
 
-        {/* Global Real-Time Market Ticker Bar */}
-        <LiveMarketTicker />
+        {/* Keep the conversation area spacious while chatting. */}
+        {page !== 'chat' && <LiveMarketTicker />}
 
         {/* Main Content Body with smooth page transitions */}
-        <div key={page} className="flex-1 flex flex-col h-full overflow-hidden animate-page-fade">
+        <div key={page} className="flex-1 flex flex-col min-h-0 overflow-hidden animate-page-fade">
           {page === 'chat' ? (
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-hidden">
               <ChatPage userProfile={userProfile} isAuthenticated={Boolean(account)} />
             </div>
           ) : (

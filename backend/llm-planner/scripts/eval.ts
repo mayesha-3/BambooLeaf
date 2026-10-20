@@ -85,7 +85,7 @@ if (live) {
   quarantineChat = throttle(createChainChat({ config, chain: config.quarantineChain, budget, logger }))
 } else {
   console.log('*** MOCK MODE: rule-based fake model, no network. Results say nothing about Groq or any real model. ***')
-  chat = createMockChat(Object.keys(book))
+  chat = createMockChat([...new Set([...Object.keys(book), ...cases.flatMap((c) => Object.keys(c.addressBook ?? {}))])])
   quarantineChat = createMockQuarantineChat()
 }
 
@@ -93,7 +93,7 @@ const base = { tokens: config?.tokens ?? ['ETH', 'USDC'], chainId: config?.chain
 const records: RunRecord[] = []
 for (let run = 1; run <= runs; run++) {
   for (const c of cases) {
-    const r = await planGoal(c.goal, { ...base, chat })
+    const r = await planGoal(c.goal, { ...base, addressBook: c.addressBook ?? book, chat })
     const rec: RunRecord = { caseId: c.id, category: c.category, kind: c.kind, run, mode, verdict: judge(c, r), code: r.ok ? undefined : r.code, modelCalls: r.stats.modelCalls, totalTokens: r.stats.totalTokens, latencyMs: r.stats.latencyMs, caseHash: caseHash(c), set: c.set, result: toRecorded(r) }
     records.push(rec)
     console.log(`${mode.toUpperCase()} ${c.id} run${run} ${rec.verdict}${rec.code ? ` (${rec.code})` : ''}`)
