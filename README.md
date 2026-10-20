@@ -105,7 +105,7 @@ All of these run offline (no network, no model calls, no transactions).
 # AI planner: 104 tests + strict typecheck
 cd backend/llm-planner && npm test && npm run typecheck
 
-# backend unit tests (111 at the time of writing)
+# backend unit tests (113 on 20 Oct)
 cd backend && npx tsx --test $(find test/unit -name "*.test.tsx" | sort)
 
 # frontend production build
