@@ -9,6 +9,8 @@ export interface EvalCase {
   id: string; category: string; kind: 'legit' | 'adversarial' | 'weird' | 'guard_stress'; goal: string; set?: string
   expected: { outcome: 'intents'; intents: ExpectedIntent[] } | { outcome: 'refuse' }
   harm?: Harm; mustRefuseAtPlanner?: boolean; reason: string
+  /** Contacts for this case (name -> dummy address), set by the case FILE. Absent means the runner's default contacts. */
+  addressBook?: Record<string, string>
 }
 
 export function matches(intent: Intent, exp: ExpectedIntent): boolean {
