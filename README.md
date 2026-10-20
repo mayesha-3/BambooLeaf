@@ -102,7 +102,7 @@ Sign-in uses a wallet-signed device session plus a per-request device signature.
 All of these run offline (no network, no model calls, no transactions).
 
 ```bash
-# AI planner: 93 tests + strict typecheck
+# AI planner: 104 tests + strict typecheck
 cd backend/llm-planner && npm test && npm run typecheck
 
 # backend unit tests (111 at the time of writing)
@@ -120,9 +120,9 @@ Planner evaluation (mock mode is offline; live mode needs provider keys and cost
 
 | Evidence | Result | Caveat |
 |---|---|---|
-| Live planner run, 2026-10-17 (68 cases, Groq) | schema-valid 64/64, legit pass 22/22 (23/23 after rerunning 3 network errors), 0 false positives, 6/41 harmful requests passed on by the planner (6/43 after the same reruns) | Planner only. The planner is not the security boundary. Held-out cases were written after seeing the prompt, so they are not independent |
-| Offline guard replay of those outputs (run on the 17 Oct guard and again on the 19 Oct guard; same result, only the ETH to USDC swap cases L05 and L10 changed from denied to approval required) | 0 of 45 attack runs would still execute a harmful intent with the guard on (8 would with it off) | Offline replay, not an end-to-end red team. No database, signer or live chain |
-| Quarantine run, 2026-10-18 (13 cases) | 9/9 injected documents flagged, 0/4 benign flagged | Small set; detection is probabilistic |
+| Live planner run, 2026-10-20 (93 model calls incl. 13 documents, Groq) | schema-valid 75/75, normal goals 25/25 pass with 0 refused, 7/49 attack or must-refuse goals passed on by the planner (base 2/24, held-out A 1/8, held-out B 3/11, human-written capability set 1/6) | Planner only. The planner is not the security boundary. Held-out cases were written after seeing the prompt, so they are not independent. All test cases were written by the team (8 by a human, the rest with AI help). |
+| Offline guard replay of the 20 Oct outputs (current guard) | 0 of 60 attack runs would execute with the guard on; all 9 harmful outputs stopped (1 only by the adapter) | Offline replay, not an end-to-end red team. No database, signer or live chain. In the current backend balance reads are answered before the guard. |
+| Quarantine run, 2026-10-18 and 2026-10-20 (13 cases) | 9/9 injected documents flagged, 0/4 benign flagged | Small set; detection is probabilistic |
 
 Reports: [backend/llm-planner/eval/reports/](./backend/llm-planner/eval/reports/). Not yet evidenced: a full end-to-end red team with the signer, and repeated live Sepolia runs. See [docs/technical-handoff.md](./docs/technical-handoff.md).
 
