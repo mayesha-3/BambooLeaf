@@ -1,0 +1,111 @@
+/* Splash screen: the logo and the name, centred, like the start screen of a wallet app.
+   Uses the app's own palette and fonts (see tailwind.config.js and index.css):
+   slate surfaces, a lime accent, Outfit for the name.
+   Dark mode follows the app's `html.dark` class, not only the operating system setting. */
+.bl-landing {
+  --bl-bg: #fbfbfc;
+  --bl-text: #0f172a;
+  --bl-accent: #65a30d;
+  --bl-glow: rgba(163, 230, 53, 0.18);
+  /* Logo colours: bamboo and leaf outline use the accent, the leaf is cut out in the page colour. */
+  --bl-ink: var(--bl-accent);
+  --bl-paper: var(--bl-bg);
+
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  background:
+    radial-gradient(34rem 28rem at 50% 45%, var(--bl-glow), transparent 70%),
+    var(--bl-bg);
+  color: var(--bl-text);
+  cursor: pointer;
+  opacity: 1;
+  transition: opacity 400ms ease;
+  animation: bl-splash-in 500ms ease both;
+  -webkit-font-smoothing: antialiased;
+}
+
+:root.dark .bl-landing {
+  --bl-bg: #080d19;
+  --bl-text: #f1f5f9;
+  --bl-accent: #a3e635;
+  --bl-glow: rgba(132, 204, 22, 0.14);
+}
+
+.bl-landing--leaving {
+  opacity: 0;
+}
+
+.bl-landing__logo {
+  width: min(52vw, 11rem);
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.bl-landing__name {
+  margin: 0;
+  font-family: 'Outfit', 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: clamp(1.75rem, 5vw, 2.5rem);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  animation: bl-name-in 700ms cubic-bezier(0.2, 0.7, 0.2, 1) 500ms both;
+}
+
+@keyframes bl-splash-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes bl-name-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The one moment of motion on the logo: the leaf settles onto the bamboo. */
+.bl-logo__leaf--settle {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: bl-leaf-settle 900ms cubic-bezier(0.2, 0.7, 0.2, 1) 150ms both;
+}
+
+@keyframes bl-leaf-settle {
+  from {
+    transform: translate(-14px, -30px) rotate(-22deg);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bl-landing,
+  .bl-landing__name,
+  .bl-logo__leaf--settle {
+    animation: none;
+  }
+
+  .bl-landing {
+    transition: none;
+  }
+
+  /* No fade-out either: stay fully visible until the app opens. */
+  .bl-landing--leaving {
+    opacity: 1;
+  }
+}
