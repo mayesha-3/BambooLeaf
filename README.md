@@ -1,8 +1,10 @@
 # BambooLeaf
 
-BambooLeaf is a **guarded AI wallet**. You type what you want in plain language ("send 0.01 ETH to Treasury", "swap 20 USDC to ETH"). An AI model only *proposes* a structured intent. Deterministic code then validates it, applies policy limits, asks a human when needed, and only then lets a signer submit a transaction.
+BambooLeaf is a **guarded AI wallet**. You type what you want in plain language (e.g., *"send 0.01 ETH to Treasury"*, *"swap 20 USDC to ETH"*, or *"check my balance"*). An AI model only *proposes* a structured intent. Deterministic code then validates it, applies policy limits, asks a human when needed, and only then lets a signer submit a transaction.
 
-> **Status: course/hackathon prototype, testnet only.** It has not been security-audited. Never put a key that holds real funds in it. See [Current limitations](#current-limitations).
+> **Status:** Hackathon prototype running on **Ethereum Sepolia Testnet** (`Chain ID: 11155111`). It has not been security-audited. Never put a key that holds real funds in it. See [Current limitations](#current-limitations).
+
+---
 
 ## How it works
 
@@ -28,6 +30,16 @@ The key idea: **the model has no authority.** It cannot sign, approve or change 
 | Autonomy levels | L0 frozen, L1 every action needs approval (default), L2/L3 earned auto-execution within policy. Certain blocked attempts freeze the agent |
 | Approvals and signer | Owner approves a digest that binds chain, destination, value, calldata, nonce and expiry; the signer re-verifies right before sending |
 | Audit | Every decision is written to a hash-linked log that can be verified through the API |
+
+### Architecture Decision: Why MongoDB Instead of SQL?
+
+If you're wondering why a financial application uses a NoSQL database instead of SQL (like PostgreSQL), here is our reasoning:
+
+1. **Blockchain is the Source of Truth:** Actual funds and token balances are strictly secured on the Ethereum blockchain, not in the database. The database holds zero financial value.
+2. **Strictly Off-Chain State:** MongoDB is used only for operational data like hash-linked audit trails, device sessions, and human approval tickets.
+3. **Efficient JSON Handling:** Our AI planner generates complex, nested JSON intents. MongoDB's flexible schema handles this dynamic data natively and much faster than SQL's relational tables.
+4. **High Scalability:** If the system scales to thousands of active agents and devices, MongoDB can easily handle the load through horizontal scaling.
+5. **Developer Velocity:** Since this is an AI prototype, data requirements change rapidly. With SQL, adding a new field requires writing migration scripts and altering tables. With MongoDB, we just add the field to our JSON model and it works instantly, saving us critical development time.
 
 ## Repository layout
 
@@ -281,7 +293,7 @@ The API deploys to Render (`render.yaml`) and the frontend to Vercel (`frontend/
 
 ## Current limitations
 
-- **Supported on-chain actions are narrow:** native ETH transfers to allow-listed recipients, and token swaps through one configured allow-listed router (native ETH goes through WETH). ERC-20 transfers are not supported.
+- **Supported on-chain actions are narrow:** Native ETH transfers to allow-listed recipients, and token swaps through one configured allow-listed router (native ETH goes through WETH). ERC-20 transfers are currently not supported via the UI.
 - **Balance requests** ("what is my balance?") are handled, but they read through the signer wallet, so they fail when `AGENT_KEY` is empty. `read_quote` is not handled yet.
 - **Swap approvals** Swap approvals exist in code and unit tests. Live Sepolia swaps are not fully verified end-to-end via the UI, but the underlying routing, quoting, and execution logic successfully pass offline simulation tests using a local Anvil shadow fork.
 - **Model dependence:** injection detection is probabilistic. The deterministic guard is the security boundary, and provider outages make requests fail closed.
