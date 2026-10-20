@@ -87,6 +87,8 @@ npx tsx --test $(find test/unit -name "*.test.tsx" | sort)
 # Frontend production build
 cd ../frontend && npm run build
 
+```
+
 ---
 
 ## Deployment Commands
@@ -94,18 +96,35 @@ cd ../frontend && npm run build
 ### Backend (Render)
 
 * **Build Command:**
+```bash
 cd backend; npm install
 
+```
+
+
 * **Start Command:**
+```bash
 cd backend; npm start
+
+```
+
 
 ### Frontend (Vercel)
 
 * **Build Command:**
+```bash
 cd frontend; npm run build
 
+```
+
+
 * **Development / Output Command:**
+```bash
 cd frontend; npm run dev
+
+```
+
+
 
 ---
 
@@ -113,12 +132,23 @@ cd frontend; npm run dev
 
 * **Natural-Language Execution:** State transfers and swaps in plain conversational English.
 
+
 * **Deterministic Guardrails:** Hard spending limits, daily caps, and velocity windows that the AI cannot override.
+
 
 * **Autonomous Tiers & Demotion:** Earns autonomy ($L1 \rightarrow L3$) through clean runs; instantly freezes ($L0$) on suspicious behavior or kill-switch activation.
 
+
 * **B2B Supplier Registry:** Payout addresses are strictly grounded against an approved vendor registry, blocking invoice address spoofing.
+
 
 * **Manual Portal Fallback (`/#/transact`):** Complete transactions directly under policy guardrails even if the LLM goes offline.
 
+
 * **Attack Arena (`/#/arena`):** Isolated sandbox to test adversarial prompt injections and jailbreaks without touching the signer.
+
+
+
+```
+
+```
