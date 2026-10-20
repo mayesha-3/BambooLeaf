@@ -300,14 +300,21 @@ function TypingIndicator() {
   )
 }
 
-function ContextPanel({ width, onResizeStart, userProfile }: { width: number; onResizeStart: (e: React.MouseEvent) => void; userProfile?: UserProfile }) {
+function ContextPanel({ width, onResizeStart, userProfile, isAuthenticated }: { width: number; onResizeStart: (e: React.MouseEvent) => void; userProfile?: UserProfile; isAuthenticated: boolean }) {
   const [walletData, setWalletData] = useState<{ balanceEth: string; balanceUsdc: string } | null>(null)
   useEffect(() => {
-    fetch(`${apiBaseUrl}/wallet/balance`)
-      .then(res => res.json() as Promise<{ balanceEth: string; balanceUsdc: string }>)
-      .then(data => setWalletData(data))
-      .catch(console.error)
-  }, [])
+    if (!isAuthenticated) return
+
+    let active = true
+    authenticatedFetch(`${apiBaseUrl}/wallet/balance`)
+      .then(res => {
+        if (!res.ok) throw new Error(`Could not load wallet balance (${res.status}).`)
+        return res.json() as Promise<{ balanceEth: string; balanceUsdc: string }>
+      })
+      .then(data => { if (active) setWalletData(data) })
+      .catch(error => { if (active) console.error(error) })
+    return () => { active = false }
+  }, [isAuthenticated])
 
   return (
     <aside className="hidden xl:flex flex-col shrink-0 border-l border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0c1220] overflow-y-auto relative transition-colors" style={{ width }}>
@@ -356,13 +363,19 @@ function ContextPanel({ width, onResizeStart, userProfile }: { width: number; on
             <div className="relative z-[1] flex items-start justify-between">
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-bold text-lime-50/70 uppercase tracking-wider">Total balance</p>
-                <p className="text-2xl font-extrabold mt-1 tracking-tight">
-                  {walletData ? `${walletData.balanceEth} ETH` : 'Loading...'}
-                </p>
-                <div className="flex gap-4 mt-3 text-[11px]">
-                  <div><p className="text-lime-50/70">ETH</p><p className="font-bold">{walletData ? walletData.balanceEth : '-'}</p></div>
-                  <div><p className="text-lime-50/70">USDC</p><p className="font-bold">{walletData ? walletData.balanceUsdc : '-'}</p></div>
-                </div>
+                {isAuthenticated ? (
+                  <>
+                    <p className="text-2xl font-extrabold mt-1 tracking-tight">
+                      {walletData ? Number(walletData.balanceEth) > 0 ? `${walletData.balanceEth} ETH` : '0 ETH' : 'Loading...'}
+                    </p>
+                    <div className="flex gap-4 mt-3 text-[11px]">
+                      <div><p className="text-lime-50/70">ETH</p><p className="font-bold">{walletData ? walletData.balanceEth || '-' : 'Loading...'}</p></div>
+                      <div><p className="text-lime-50/70">USDC</p><p className="font-bold">{walletData ? walletData.balanceUsdc || '-' : 'Loading...'}</p></div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="mt-2 text-sm font-semibold">Log in to view your balance</p>
+                )}
               </div>
               <div className="w-10 h-10 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center shrink-0 ml-3 mt-1">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -531,9 +544,10 @@ const quickPrompts = ['Check my balance', 'Swap 20 USDC to ETH', 'Send 0.01 ETH 
 
 interface ChatPageProps {
   userProfile?: UserProfile
+  isAuthenticated?: boolean
 }
 
-export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {}) {
+export default function ChatPage({ userProfile: propProfile, isAuthenticated = false }: ChatPageProps = {}) {
   const [storedUserProfile] = useState<UserProfile>(() => {
     if (propProfile) return propProfile
     try {
@@ -756,7 +770,7 @@ export default function ChatPage({ userProfile: propProfile }: ChatPageProps = {
           </p>
         </div>
       </div>
-      <ContextPanel width={contextPanelWidth} onResizeStart={handleContextResizeStart} userProfile={userProfile} />
+      <ContextPanel key={isAuthenticated ? userProfile.walletAddress || 'signed-in' : 'guest'} width={contextPanelWidth} onResizeStart={handleContextResizeStart} userProfile={userProfile} isAuthenticated={isAuthenticated} />
     </div>
   )
 }

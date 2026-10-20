@@ -956,7 +956,7 @@ export function App() {
         <div key={page} className="flex-1 flex flex-col h-full overflow-hidden animate-page-fade">
           {page === 'chat' ? (
             <div className="flex-1 overflow-hidden">
-              <ChatPage userProfile={userProfile} />
+              <ChatPage userProfile={userProfile} isAuthenticated={Boolean(account)} />
             </div>
           ) : (
             <main className="p-5 sm:p-7 lg:p-8 flex-1 overflow-y-auto">
