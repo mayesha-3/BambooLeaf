@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { LANGUAGES, isLanguageCode, nextLanguage, pickLanguage } from '../../src/features/landing/i18n'
 import {
-  LANDING_LANG_KEY,
-  getSavedLanguage,
+  APP_THEME_KEY,
+  BRAND_NAME,
+  FADE_OUT_MS,
+  SPLASH_MS,
   hasSeenLanding,
   isLandingEnabled,
   markLandingSeen,
-  APP_THEME_KEY,
   prefersDarkTheme,
-  saveLanguage,
 } from '../../src/features/landing/landing-state'
 import { BAMBOO_SEGMENTS, LEAF_POINTS } from '../../src/features/landing/logo-geometry'
 
@@ -32,52 +31,33 @@ const blockedStore = {
   },
 }
 
-test('the opening page is on unless VITE_SHOW_LANDING is the text "false"', () => {
+test('the splash lasts 3 to 4 seconds and the fade-out fits inside it', () => {
+  assert.ok(SPLASH_MS >= 3000 && SPLASH_MS <= 4000)
+  assert.ok(FADE_OUT_MS > 0 && FADE_OUT_MS < SPLASH_MS)
+})
+
+test('the only text on the splash is the brand name', () => {
+  assert.equal(BRAND_NAME, 'BambooLeaf')
+})
+
+test('the splash is on unless VITE_SHOW_LANDING is the text "false"', () => {
   assert.equal(isLandingEnabled(undefined), true)
   assert.equal(isLandingEnabled('true'), true)
   assert.equal(isLandingEnabled('false'), false)
 })
 
-test('the opening page shows once per session', () => {
+test('the splash shows once per session', () => {
   const store = memoryStore()
   assert.equal(hasSeenLanding(store), false)
   markLandingSeen(store)
   assert.equal(hasSeenLanding(store), true)
 })
 
-test('blocked or missing storage never throws and shows the page again', () => {
+test('blocked or missing storage never throws and shows the splash again', () => {
   assert.equal(hasSeenLanding(null), false)
   assert.equal(hasSeenLanding(blockedStore), false)
   assert.doesNotThrow(() => markLandingSeen(blockedStore))
   assert.doesNotThrow(() => markLandingSeen(null))
-})
-
-test('language: saved choice wins, then browser language, then English', () => {
-  assert.equal(pickLanguage('bn', 'en-US'), 'bn')
-  assert.equal(pickLanguage('xx', 'bn-BD'), 'bn')
-  assert.equal(pickLanguage(null, 'en-GB'), 'en')
-  assert.equal(pickLanguage(null, undefined), 'en')
-  assert.equal(pickLanguage('toString', 'fr'), 'en')
-})
-
-test('language switch cycles and a saved value is checked', () => {
-  assert.equal(nextLanguage('en'), 'bn')
-  assert.equal(nextLanguage('bn'), 'en')
-  const store = memoryStore({ [LANDING_LANG_KEY]: 'nonsense' })
-  assert.equal(getSavedLanguage(store), null)
-  saveLanguage(store, 'bn')
-  assert.equal(getSavedLanguage(store), 'bn')
-  assert.equal(isLanguageCode('en'), true)
-})
-
-test('every language has the same keys and three headline lines', () => {
-  const reference = Object.keys(LANGUAGES.en).sort()
-  for (const copy of Object.values(LANGUAGES)) {
-    assert.deepEqual(Object.keys(copy).sort(), reference)
-    assert.equal(copy.headline.length, 3)
-    assert.ok(copy.enter.length > 0 && copy.intro.length > 0)
-    assert.ok(copy.dir === 'ltr' || copy.dir === 'rtl')
-  }
 })
 
 test('theme follows the app: saved choice wins, otherwise the system setting', () => {

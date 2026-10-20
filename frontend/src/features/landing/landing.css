@@ -1,205 +1,81 @@
-/* Opening page. Uses the app's own palette and fonts (see tailwind.config.js and index.css):
-   slate surfaces, a lime accent, Outfit for headings and Plus Jakarta Sans for text.
+/* Splash screen: the logo and the name, centred, like the start screen of a wallet app.
+   Uses the app's own palette and fonts (see tailwind.config.js and index.css):
+   slate surfaces, a lime accent, Outfit for the name.
    Dark mode follows the app's `html.dark` class, not only the operating system setting. */
 .bl-landing {
   --bl-bg: #fbfbfc;
   --bl-text: #0f172a;
-  --bl-mute: #64748b;
-  --bl-border: rgba(15, 23, 42, 0.1);
   --bl-accent: #65a30d;
-  --bl-glow: rgba(163, 230, 53, 0.16);
-  --bl-button-bg: #020617;
-  --bl-button-text: #fff;
-  --bl-button-hover: #1e293b;
+  --bl-glow: rgba(163, 230, 53, 0.18);
   /* Logo colours: bamboo and leaf outline use the accent, the leaf is cut out in the page colour. */
   --bl-ink: var(--bl-accent);
   --bl-paper: var(--bl-bg);
 
   box-sizing: border-box;
   height: 100%;
-  overflow-y: auto;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
   background:
-    radial-gradient(60rem 40rem at 85% -10%, var(--bl-glow), transparent 60%),
+    radial-gradient(34rem 28rem at 50% 45%, var(--bl-glow), transparent 70%),
     var(--bl-bg);
   color: var(--bl-text);
-  font-family: 'Plus Jakarta Sans', 'Noto Sans Bengali', 'Shonar Bangla', 'Nirmala UI', Inter, system-ui, sans-serif;
+  cursor: pointer;
+  opacity: 1;
+  transition: opacity 400ms ease;
+  animation: bl-splash-in 500ms ease both;
   -webkit-font-smoothing: antialiased;
 }
 
 :root.dark .bl-landing {
   --bl-bg: #080d19;
   --bl-text: #f1f5f9;
-  --bl-mute: #94a3b8;
-  --bl-border: rgba(51, 65, 85, 0.45);
   --bl-accent: #a3e635;
-  --bl-glow: rgba(132, 204, 22, 0.12);
-  --bl-button-bg: #a3e635;
-  --bl-button-text: #020617;
-  --bl-button-hover: #bef264;
+  --bl-glow: rgba(132, 204, 22, 0.14);
 }
 
-.bl-landing button:focus-visible {
-  outline: 3px solid var(--bl-accent);
-  outline-offset: 3px;
-}
-
-/* Header, main and footer share one width and one side padding, so their left edges line up. */
-.bl-landing__bar,
-.bl-landing__main,
-.bl-landing__footer {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: 76rem;
-  margin: 0 auto;
-  padding-inline: clamp(1.25rem, 5vw, 5rem);
-}
-
-.bl-landing__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-block: 1.25rem;
-}
-
-.bl-landing__brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.625rem;
-  font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
-  font-size: 1.125rem;
-  font-weight: 900;
-  letter-spacing: -0.02em;
-}
-
-.bl-landing__brand-mark {
-  width: 2.25rem;
-  height: 2.25rem;
-}
-
-.bl-landing__lang {
-  font: inherit;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  color: var(--bl-text);
-  background: transparent;
-  border: 1px solid var(--bl-border);
-  border-radius: 9999px;
-  padding: 0.4rem 0.95rem;
-  cursor: pointer;
-  transition: border-color 120ms, color 120ms;
-}
-
-.bl-landing__lang:hover {
-  border-color: var(--bl-accent);
-  color: var(--bl-accent);
-}
-
-.bl-landing__main {
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  align-items: center;
-  gap: clamp(2rem, 6vw, 6rem);
-  padding-block: 1rem 2rem;
-}
-
-.bl-landing__headline {
-  margin: 0;
-  font-family: 'Outfit', 'Plus Jakarta Sans', 'Noto Sans Bengali', sans-serif;
-  font-size: clamp(2.25rem, 4.2vw, 3.75rem);
-  font-weight: 900;
-  line-height: 1.04;
-  letter-spacing: -0.035em;
-}
-
-.bl-landing__headline span {
-  display: block;
-  white-space: nowrap;
-}
-
-/* The last line ("Your approval.") carries the accent, like the lime highlights in the app. */
-.bl-landing__headline span:last-child {
-  color: var(--bl-accent);
-}
-
-/* Bangla needs more line height and no negative tracking. */
-:root[lang='bn'] .bl-landing__headline {
-  line-height: 1.3;
-  letter-spacing: 0;
-}
-
-.bl-landing__intro {
-  max-width: 32rem;
-  margin: 1.75rem 0 2rem;
-  font-size: 1.0625rem;
-  line-height: 1.65;
-  color: var(--bl-mute);
-}
-
-.bl-landing__enter {
-  font: inherit;
-  font-size: 0.9375rem;
-  font-weight: 700;
-  color: var(--bl-button-text);
-  background: var(--bl-button-bg);
-  border: 0;
-  border-radius: 0.75rem;
-  padding: 0.9rem 1.6rem;
-  cursor: pointer;
-  box-shadow: 0 2px 10px rgba(132, 204, 22, 0.25);
-  transition: background-color 120ms;
-}
-
-.bl-landing__enter:hover {
-  background: var(--bl-button-hover);
-}
-
-.bl-landing__note {
-  margin: 1.25rem 0 0;
-  font-size: 0.8125rem;
-  color: var(--bl-mute);
-}
-
-.bl-landing__art {
-  display: grid;
-  place-items: center;
+.bl-landing--leaving {
+  opacity: 0;
 }
 
 .bl-landing__logo {
-  width: min(100%, 30rem);
+  width: min(52vw, 11rem);
   height: auto;
   aspect-ratio: 1;
 }
 
-.bl-landing__footer {
-  padding-block: 1.25rem;
-  font-size: 0.75rem;
-  color: var(--bl-mute);
-  border-top: 1px solid var(--bl-border);
+.bl-landing__name {
+  margin: 0;
+  font-family: 'Outfit', 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: clamp(1.75rem, 5vw, 2.5rem);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  animation: bl-name-in 700ms cubic-bezier(0.2, 0.7, 0.2, 1) 500ms both;
 }
 
-@media (max-width: 52rem) {
-  .bl-landing__main {
-    grid-template-columns: 1fr;
-    gap: 1.5rem;
+@keyframes bl-splash-in {
+  from {
+    opacity: 0;
   }
-
-  .bl-landing__art {
-    order: -1;
-    justify-self: start;
-  }
-
-  .bl-landing__logo {
-    width: min(55vw, 13rem);
-  }
-
-  .bl-landing__headline span {
-    white-space: normal;
+  to {
+    opacity: 1;
   }
 }
 
-/* The one moment of motion: the leaf settles onto the bamboo when the page opens. */
+@keyframes bl-name-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The one moment of motion on the logo: the leaf settles onto the bamboo. */
 .bl-logo__leaf--settle {
   transform-box: fill-box;
   transform-origin: center;
@@ -218,7 +94,18 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .bl-landing,
+  .bl-landing__name,
   .bl-logo__leaf--settle {
     animation: none;
+  }
+
+  .bl-landing {
+    transition: none;
+  }
+
+  /* No fade-out either: stay fully visible until the app opens. */
+  .bl-landing--leaving {
+    opacity: 1;
   }
 }

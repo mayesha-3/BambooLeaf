@@ -1,210 +1,87 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BambooLeaf opening page (preview)</title>
+<title>BambooLeaf opening splash (preview)</title>
 <link rel="icon" href="../../frontend/public/favicon.svg">
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&family=Plus+Jakarta+Sans:wght@400;600;700&display=swap" rel="stylesheet"><style>html,body{margin:0;height:100%}
-/* Opening page. Uses the app's own palette and fonts (see tailwind.config.js and index.css):
-   slate surfaces, a lime accent, Outfit for headings and Plus Jakarta Sans for text.
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@900&display=swap" rel="stylesheet">
+<style>html,body{margin:0;height:100%}
+/* Splash screen: the logo and the name, centred, like the start screen of a wallet app.
+   Uses the app's own palette and fonts (see tailwind.config.js and index.css):
+   slate surfaces, a lime accent, Outfit for the name.
    Dark mode follows the app's `html.dark` class, not only the operating system setting. */
 .bl-landing {
   --bl-bg: #fbfbfc;
   --bl-text: #0f172a;
-  --bl-mute: #64748b;
-  --bl-border: rgba(15, 23, 42, 0.1);
   --bl-accent: #65a30d;
-  --bl-glow: rgba(163, 230, 53, 0.16);
-  --bl-button-bg: #020617;
-  --bl-button-text: #fff;
-  --bl-button-hover: #1e293b;
+  --bl-glow: rgba(163, 230, 53, 0.18);
   /* Logo colours: bamboo and leaf outline use the accent, the leaf is cut out in the page colour. */
   --bl-ink: var(--bl-accent);
   --bl-paper: var(--bl-bg);
 
   box-sizing: border-box;
   height: 100%;
-  overflow-y: auto;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
   background:
-    radial-gradient(60rem 40rem at 85% -10%, var(--bl-glow), transparent 60%),
+    radial-gradient(34rem 28rem at 50% 45%, var(--bl-glow), transparent 70%),
     var(--bl-bg);
   color: var(--bl-text);
-  font-family: 'Plus Jakarta Sans', 'Noto Sans Bengali', 'Shonar Bangla', 'Nirmala UI', Inter, system-ui, sans-serif;
+  cursor: pointer;
+  opacity: 1;
+  transition: opacity 400ms ease;
+  animation: bl-splash-in 500ms ease both;
   -webkit-font-smoothing: antialiased;
 }
 
 :root.dark .bl-landing {
   --bl-bg: #080d19;
   --bl-text: #f1f5f9;
-  --bl-mute: #94a3b8;
-  --bl-border: rgba(51, 65, 85, 0.45);
   --bl-accent: #a3e635;
-  --bl-glow: rgba(132, 204, 22, 0.12);
-  --bl-button-bg: #a3e635;
-  --bl-button-text: #020617;
-  --bl-button-hover: #bef264;
+  --bl-glow: rgba(132, 204, 22, 0.14);
 }
 
-.bl-landing button:focus-visible {
-  outline: 3px solid var(--bl-accent);
-  outline-offset: 3px;
-}
-
-/* Header, main and footer share one width and one side padding, so their left edges line up. */
-.bl-landing__bar,
-.bl-landing__main,
-.bl-landing__footer {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: 76rem;
-  margin: 0 auto;
-  padding-inline: clamp(1.25rem, 5vw, 5rem);
-}
-
-.bl-landing__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-block: 1.25rem;
-}
-
-.bl-landing__brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.625rem;
-  font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
-  font-size: 1.125rem;
-  font-weight: 900;
-  letter-spacing: -0.02em;
-}
-
-.bl-landing__brand-mark {
-  width: 2.25rem;
-  height: 2.25rem;
-}
-
-.bl-landing__lang {
-  font: inherit;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  color: var(--bl-text);
-  background: transparent;
-  border: 1px solid var(--bl-border);
-  border-radius: 9999px;
-  padding: 0.4rem 0.95rem;
-  cursor: pointer;
-  transition: border-color 120ms, color 120ms;
-}
-
-.bl-landing__lang:hover {
-  border-color: var(--bl-accent);
-  color: var(--bl-accent);
-}
-
-.bl-landing__main {
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  align-items: center;
-  gap: clamp(2rem, 6vw, 6rem);
-  padding-block: 1rem 2rem;
-}
-
-.bl-landing__headline {
-  margin: 0;
-  font-family: 'Outfit', 'Plus Jakarta Sans', 'Noto Sans Bengali', sans-serif;
-  font-size: clamp(2.25rem, 4.2vw, 3.75rem);
-  font-weight: 900;
-  line-height: 1.04;
-  letter-spacing: -0.035em;
-}
-
-.bl-landing__headline span {
-  display: block;
-  white-space: nowrap;
-}
-
-/* The last line ("Your approval.") carries the accent, like the lime highlights in the app. */
-.bl-landing__headline span:last-child {
-  color: var(--bl-accent);
-}
-
-/* Bangla needs more line height and no negative tracking. */
-:root[lang='bn'] .bl-landing__headline {
-  line-height: 1.3;
-  letter-spacing: 0;
-}
-
-.bl-landing__intro {
-  max-width: 32rem;
-  margin: 1.75rem 0 2rem;
-  font-size: 1.0625rem;
-  line-height: 1.65;
-  color: var(--bl-mute);
-}
-
-.bl-landing__enter {
-  font: inherit;
-  font-size: 0.9375rem;
-  font-weight: 700;
-  color: var(--bl-button-text);
-  background: var(--bl-button-bg);
-  border: 0;
-  border-radius: 0.75rem;
-  padding: 0.9rem 1.6rem;
-  cursor: pointer;
-  box-shadow: 0 2px 10px rgba(132, 204, 22, 0.25);
-  transition: background-color 120ms;
-}
-
-.bl-landing__enter:hover {
-  background: var(--bl-button-hover);
-}
-
-.bl-landing__note {
-  margin: 1.25rem 0 0;
-  font-size: 0.8125rem;
-  color: var(--bl-mute);
-}
-
-.bl-landing__art {
-  display: grid;
-  place-items: center;
+.bl-landing--leaving {
+  opacity: 0;
 }
 
 .bl-landing__logo {
-  width: min(100%, 30rem);
+  width: min(52vw, 11rem);
   height: auto;
   aspect-ratio: 1;
 }
 
-.bl-landing__footer {
-  padding-block: 1.25rem;
-  font-size: 0.75rem;
-  color: var(--bl-mute);
-  border-top: 1px solid var(--bl-border);
+.bl-landing__name {
+  margin: 0;
+  font-family: 'Outfit', 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: clamp(1.75rem, 5vw, 2.5rem);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  animation: bl-name-in 700ms cubic-bezier(0.2, 0.7, 0.2, 1) 500ms both;
 }
 
-@media (max-width: 52rem) {
-  .bl-landing__main {
-    grid-template-columns: 1fr;
-    gap: 1.5rem;
+@keyframes bl-splash-in {
+  from {
+    opacity: 0;
   }
-
-  .bl-landing__art {
-    order: -1;
-    justify-self: start;
-  }
-
-  .bl-landing__logo {
-    width: min(55vw, 13rem);
-  }
-
-  .bl-landing__headline span {
-    white-space: normal;
+  to {
+    opacity: 1;
   }
 }
 
-/* The one moment of motion: the leaf settles onto the bamboo when the page opens. */
+@keyframes bl-name-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The one moment of motion on the logo: the leaf settles onto the bamboo. */
 .bl-logo__leaf--settle {
   transform-box: fill-box;
   transform-origin: center;
@@ -223,40 +100,34 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .bl-landing,
+  .bl-landing__name,
   .bl-logo__leaf--settle {
     animation: none;
   }
+
+  .bl-landing {
+    transition: none;
+  }
+
+  /* No fade-out either: stay fully visible until the app opens. */
+  .bl-landing--leaving {
+    opacity: 1;
+  }
 }
-</style><script>if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark")</script></head>
-<body>
-<div class="bl-landing">
-  <header class="bl-landing__bar"><span class="bl-landing__brand" id="brand">BambooLeaf</span>
-    <button type="button" class="bl-landing__lang" id="lang" aria-label="Switch language to Bangla">বাংলা</button></header>
-  <main class="bl-landing__main">
-    <div class="bl-landing__copy">
-      <h1 class="bl-landing__headline" id="headline"><span>Your intent.</span><span>Your rules.</span><span>Your approval.</span></h1>
-      <p class="bl-landing__intro" id="intro">A guarded AI wallet. You say what you want in plain words. The AI only proposes, fixed rules check it, and you approve what goes beyond your limits.</p>
-      <button type="button" class="bl-landing__enter" id="enter">Open BambooLeaf</button>
-      <p class="bl-landing__note" id="note">Testnet prototype, not audited. Do not use real funds.</p>
-    </div>
-    <div class="bl-landing__art"><svg viewBox="0 0 128 128" class="bl-landing__logo" role="img" aria-label="BambooLeaf logo: a maple leaf lying on three bamboo stalks" focusable="false"><g fill="var(--bl-ink, #000)"><rect x="25.5" y="20" width="15" height="24.7" rx="5.5"/><rect x="25.5" y="47.3" width="15" height="25.4" rx="5.5"/><rect x="25.5" y="75.3" width="15" height="21.4" rx="5.5"/><rect x="25.5" y="99.3" width="15" height="14.7" rx="5.5"/><rect x="56.5" y="6" width="15" height="28.7" rx="5.5"/><rect x="56.5" y="37.3" width="15" height="27.4" rx="5.5"/><rect x="56.5" y="67.3" width="15" height="27.4" rx="5.5"/><rect x="56.5" y="97.3" width="15" height="28.7" rx="5.5"/><rect x="87.5" y="26" width="15" height="24.7" rx="5.5"/><rect x="87.5" y="53.3" width="15" height="25.4" rx="5.5"/><rect x="87.5" y="81.3" width="15" height="26.7" rx="5.5"/></g><g stroke="var(--bl-paper, #fff)" stroke-width="1.7" stroke-linecap="round" opacity="0.9"><line x1="29.7" x2="29.7" y1="26" y2="38.7"/><line x1="29.7" x2="29.7" y1="53.3" y2="66.7"/><line x1="29.7" x2="29.7" y1="81.3" y2="90.7"/><line x1="60.7" x2="60.7" y1="12" y2="28.7"/><line x1="60.7" x2="60.7" y1="43.3" y2="58.7"/><line x1="60.7" x2="60.7" y1="73.3" y2="88.7"/><line x1="60.7" x2="60.7" y1="103.3" y2="120.0"/><line x1="91.7" x2="91.7" y1="32" y2="44.7"/><line x1="91.7" x2="91.7" y1="59.3" y2="72.7"/><line x1="91.7" x2="91.7" y1="87.3" y2="102.0"/></g><g transform="translate(64 60) rotate(-10) scale(0.74) translate(-50 -50)"><g class="bl-logo__leaf bl-logo__leaf--settle"><polygon points="50,2 58,22 66,16 64,34 88,26 80,46 96,52 78,62 80,76 58,68 53,74 53,98 47,98 47,74 42,68 20,76 22,62 4,52 20,46 12,26 36,34 34,16 42,22" fill="var(--bl-paper, #fff)" stroke="var(--bl-paper, #fff)" stroke-width="10" stroke-linejoin="round"/><polygon points="50,2 58,22 66,16 64,34 88,26 80,46 96,52 78,62 80,76 58,68 53,74 53,98 47,98 47,74 42,68 20,76 22,62 4,52 20,46 12,26 36,34 34,16 42,22" fill="var(--bl-paper, #fff)" stroke="var(--bl-ink, #000)" stroke-width="3.4" stroke-linejoin="round"/><path d="M50 96 L50 18 M50 60 L25 40 M50 60 L75 40" fill="none" stroke="var(--bl-ink, #000)" stroke-width="2.6" stroke-linecap="round"/></g></g></svg></div>
-  </main>
-  <footer class="bl-landing__footer" id="footer">Built for WeBank Fintechathon 2026</footer>
-</div>
+</style>
+<script>if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark")</script>
+</head><body>
+<div class="bl-landing" id="splash"><svg class="bl-landing__logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="BambooLeaf logo"><defs><mask id="bl-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128"><rect width="128" height="128" fill="#fff"/><g stroke="#1a1a1a" stroke-width="1.7" stroke-linecap="round"><line x1="29.7" y1="26" x2="29.7" y2="38.7"/><line x1="29.7" y1="53.3" x2="29.7" y2="66.7"/><line x1="29.7" y1="81.3" x2="29.7" y2="90.7"/><line x1="60.7" y1="12" x2="60.7" y2="28.7"/><line x1="60.7" y1="43.3" x2="60.7" y2="58.7"/><line x1="60.7" y1="73.3" x2="60.7" y2="88.7"/><line x1="60.7" y1="103.3" x2="60.7" y2="120"/><line x1="91.7" y1="32" x2="91.7" y2="44.7"/><line x1="91.7" y1="59.3" x2="91.7" y2="72.7"/><line x1="91.7" y1="87.3" x2="91.7" y2="102"/></g><g transform="translate(64 60) rotate(-10) scale(0.74) translate(-50 -50)"><polygon points="50,2 58,22 66,16 64,34 88,26 80,46 96,52 78,62 80,76 58,68 53,74 53,98 47,98 47,74 42,68 20,76 22,62 4,52 20,46 12,26 36,34 34,16 42,22" fill="#000" stroke="#000" stroke-width="10" stroke-linejoin="round"/></g></mask></defs><g fill="var(--bl-ink, #65A30D)" mask="url(#bl-cut)"><rect x="25.5" y="20" width="15" height="24.7" rx="5.5"/><rect x="25.5" y="47.3" width="15" height="25.4" rx="5.5"/><rect x="25.5" y="75.3" width="15" height="21.4" rx="5.5"/><rect x="25.5" y="99.3" width="15" height="14.7" rx="5.5"/><rect x="56.5" y="6" width="15" height="28.7" rx="5.5"/><rect x="56.5" y="37.3" width="15" height="27.4" rx="5.5"/><rect x="56.5" y="67.3" width="15" height="27.4" rx="5.5"/><rect x="56.5" y="97.3" width="15" height="28.7" rx="5.5"/><rect x="87.5" y="26" width="15" height="24.7" rx="5.5"/><rect x="87.5" y="53.3" width="15" height="25.4" rx="5.5"/><rect x="87.5" y="81.3" width="15" height="26.7" rx="5.5"/></g><g transform="translate(64 60) rotate(-10) scale(0.74) translate(-50 -50)" fill="none" stroke="var(--bl-ink, #65A30D)" stroke-linejoin="round" stroke-linecap="round"><g class="bl-logo__leaf bl-logo__leaf--settle"><polygon points="50,2 58,22 66,16 64,34 88,26 80,46 96,52 78,62 80,76 58,68 53,74 53,98 47,98 47,74 42,68 20,76 22,62 4,52 20,46 12,26 36,34 34,16 42,22" stroke-width="3.4"/><path d="M50 96 L50 18 M50 60 L25 40 M50 60 L75 40" stroke-width="2.6"/></g></g></svg><h1 class="bl-landing__name">BambooLeaf</h1></div>
 <script>
-// Preview only (styles copied from landing.css): the real page is React (see features/landing). Same text, same switch.
-const copy = {
-  en: { lang:'en', h:['Your intent.','Your rules.','Your approval.'], intro:'A guarded AI wallet. You say what you want in plain words. The AI only proposes, fixed rules check it, and you approve what goes beyond your limits.', enter:'Open BambooLeaf', note:'Testnet prototype, not audited. Do not use real funds.', footer:'Built for WeBank Fintechathon 2026', sw:'বাংলা', aria:'Switch language to Bangla' },
-  bn: { lang:'bn', h:['আপনার ইচ্ছা।','আপনার নিয়ম।','আপনার অনুমোদন।'], intro:'একটি সুরক্ষিত AI ওয়ালেট। আপনি সহজ ভাষায় লেখেন কী চান। AI শুধু প্রস্তাব দেয়, নির্দিষ্ট নিয়ম তা পরীক্ষা করে, আর সীমার বাইরের কাজ আপনি অনুমোদন করেন।', enter:'BambooLeaf খুলুন', note:'টেস্টনেট প্রোটোটাইপ, অডিট করা হয়নি। আসল টাকা ব্যবহার করবেন না।', footer:'WeBank Fintechathon 2026-এর জন্য তৈরি', sw:'English', aria:'ভাষা ইংরেজিতে বদলান' }
-};
-let cur = new URLSearchParams(location.search).get('lang') === 'bn' ? 'bn' : 'en';
-function render() {
-  const c = copy[cur]; document.documentElement.lang = c.lang;
-  document.getElementById('headline').innerHTML = c.h.map(t => '<span>' + t + '</span>').join('');
-  for (const [id, key] of [['intro','intro'],['enter','enter'],['note','note'],['footer','footer']]) document.getElementById(id).textContent = c[key];
-  const b = document.getElementById('lang'); b.textContent = c.sw; b.setAttribute('aria-label', c.aria);
+// Preview only (styles copied from landing.css): the real page is React, see frontend/src/features/landing.
+// Same timing as the app: 3.5 s, fade-out for the last 0.4 s, click to replay.
+const SPLASH_MS = 3500, FADE_MS = 400, el = document.getElementById('splash');
+function run() {
+  el.classList.remove('bl-landing--leaving'); el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+  setTimeout(() => el.classList.add('bl-landing--leaving'), SPLASH_MS - FADE_MS);
+  setTimeout(() => { document.title = 'BambooLeaf splash finished: the app opens here (click to replay)'; }, SPLASH_MS);
 }
-document.getElementById('lang').addEventListener('click', () => { cur = cur === 'en' ? 'bn' : 'en'; render(); });
-document.getElementById('enter').addEventListener('click', () => alert('In the real app this opens the BambooLeaf app.'));
-render();
+el.addEventListener('click', () => location.reload());
+run();
 </script></body></html>
