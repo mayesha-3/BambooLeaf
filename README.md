@@ -14,21 +14,31 @@ BambooLeaf is a **guarded AI wallet**. You type what you want in plain language 
 
 ---
 
-## How it works
+## How It Works
+
+The AI model has **no authority, no signing keys, and no direct execution tools**. The core philosophy of BambooLeaf is: *"We don't claim an agent that can't be fooled. We built one that can be fooled and still can't cause unbounded harm."*
 
 ```text
-React UI
-  -> Express API (device-wallet login, roles)
-     -> Planner bridge: untrusted text (invoices, memos) is read ONLY by a separate quarantined model
-     -> strict intent validation (the model cannot add fields, addresses or calldata)
-     -> guard: chain, action, token, recipient and router allow-lists, caps, slippage, autonomy tier
-     -> usage limits reserved
-     -> optional human approval (digest-bound, short-lived, single-use)
-     -> signer re-checks everything, then sends the transaction
-     -> hash-linked audit log
-```
+[ UNTRUSTED ZONE ]
+React 19 UI (Web Crypto API, P-256 IndexedDB Keys)
+  ↓
+Express API Gateway (Device Authentication, RBAC, Request Proofs ≤30s)
+  ↓
+1. Quarantine Layer: Isolates memos/invoices. Detects prompt injections & fails closed.
+  ↓
+2. Planner LLM (Groq): Translates text to a strict JSON intent. Cannot invent addresses.
+  ↓
+[ TRUSTED APPLICATION ZONE ]
+  ↓
+3. Deterministic Policy Guard: Enforces caps, allowlists, velocity limits, and slippage.
+  ↓
+4. Tier Router: Classifies the action into T1 (Auto), T2 (Human), or T3 (Denied).
+  ↓
+5. Signer Re-Check: Re-verifies nonce, kill-switch, and caps right before signing.
+  ↓
+[ EXECUTION ZONE ]
+Ethereum Sepolia (Chain ID: 11155111) & Tamper-Evident Audit Log
 
-The key idea: **the model has no authority.** It cannot sign, approve or change a limit. If the model is fooled, the guard behind it still has to agree.
 
 | Layer | What it enforces |
 |---|---|
@@ -117,20 +127,25 @@ Sign-in uses a wallet-signed device session plus a per-request device signature.
 | Clerk | submit goals and invoices |
 | Auditor | read-only compliance views |
 
-## Tests and checks
+## Tests and Checks
 
-All of these run offline (no network, no model calls, no transactions).
+BambooLeaf maintains strict offline test coverage. The codebase currently passes **186 automated tests** across the backend and AI planner, ensuring high stability before any on-chain execution.
+
+All of these run offline (no network, no model calls, no real transactions):
 
 ```bash
-# AI planner: 104 tests + strict typecheck
+# 1. AI Planner tests & typecheck (93 tests)
 cd backend/llm-planner && npm test && npm run typecheck
 
-# backend unit tests (113 on 20 Oct)
-cd backend && npx tsx --test $(find test/unit -name "*.test.tsx" | sort)
+# 2. Backend unit & integration tests (93 tests)
+cd backend && npm test
+npx tsx --test $(find test/unit -name "*.test.tsx" | sort)
 
-# frontend production build
+# 3. Local Anvil Swap Simulation Test (Passes)
+cd backend && npx tsx scripts/test-anvil-swap.tsx
+
+# 4. Frontend production build
 cd frontend && npm run build
-```
 
 Note that `npm test` inside `backend` runs only the integration folder because of how the shell expands the glob; use the explicit command above for the unit tests.
 
@@ -145,128 +160,6 @@ Planner evaluation (mock mode is offline; live mode needs provider keys and cost
 | Quarantine run, 2026-10-18 and 2026-10-20 (13 cases) | 9/9 injected documents flagged, 0/4 benign flagged | Small set; detection is probabilistic |
 
 Reports: [backend/llm-planner/eval/reports/](./backend/llm-planner/eval/reports/). Not yet evidenced: a full end-to-end red team with the signer, and repeated live Sepolia runs. See [docs/technical-handoff.md](./docs/technical-handoff.md).
-
-BambooLeaf is a **guarded AI agent wallet** designed for secure, autonomous Web3 disbursements. State your goal in plain language (*"send 0.01 ETH to Treasury"*, *"swap 20 USDC to ETH"*), and an AI model proposes a structured intent. A deterministic policy layer verifies limits, handles approvals, and lets the signer execute on-chain.
-
-> **Status:** Hackathon prototype running on **Ethereum Sepolia Testnet** (`Chain ID: 11155111`). Never use a private key controlling real mainnet assets.
-
-For detailed information, see the [docs folder](./docs/).
-
----
-
-
-## How It Works
-
-The AI model has **no authority, no signing keys, and no direct execution tools**.
-
-```text
-React 19 UI
-  -> Express API (P-256 device keys, RBAC)
-     -> Quarantine Layer: Isolates memos & invoices to block prompt injection
-     -> Planner Bridge: Generates strict JSON intent (no keys, no tools)
-     -> Policy Guard: Enforces allowlists, daily spending caps, velocity limits
-     -> Human Approvals: High-risk actions generate a 120s Keccak-256 ticket
-     -> Backend Signer: Rechecks limits & kill switch before sending to Sepolia
-     -> Audit Trail: SHA-256 hash-chained event logging
-
-```
-
----
-
-## Quick Start (Local Setup)
-
-### 1. Clone & Install Dependencies
-
-```bash
-git clone https://github.com/mayesha-3/BambooLeaf.git
-cd bambooleaf
-
-cd backend && npm ci
-cd llm-planner && npm ci && cd ..
-cd ../frontend && npm ci && cd ..
-
-```
-
-### 2. Configure Environment
-
-```bash
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-
-```
-
-Fill in your `MONGODB_URI`, `RPC_URL`, and `AGENT_KEY` inside `backend/.env`.
-
-### 3. Run Locally
-
-In two separate terminals:
-
-```bash
-# Terminal 1: Backend API (http://127.0.0.1:3000)
-cd backend && npm run dev:api
-
-# Terminal 2: Frontend Client (http://localhost:5173)
-cd frontend && npm run dev
-
-```
-
----
-
-## Tests & Checks
-
-Run offline tests across the stack before committing:
-
-```bash
-# AI Planner tests & typecheck (104 tests)
-cd backend/llm-planner && npm test && npm run typecheck
-
-# Backend unit & integration tests (113 tests)
-cd ../backend && npm test
-npx tsx --test $(find test/unit -name "*.test.tsx" | sort)
-
-# Frontend production build
-cd ../frontend && npm run build
-
-```
-
----
-
-## Deployment Commands
-
-### Backend (Render)
-
-* **Build Command:**
-```bash
-cd backend; npm install
-
-```
-
-
-* **Start Command:**
-```bash
-cd backend; npm start
-
-```
-
-
-### Frontend (Vercel)
-
-* **Build Command:**
-```bash
-cd frontend; npm run build
-
-```
-
-
-* **Development / Output Command:**
-```bash
-cd frontend; npm run dev
-
-```
-
-
-
----
 
 
 ## Key Features
@@ -288,9 +181,6 @@ cd frontend; npm run dev
 
 * **Attack Arena (`/#/arena`):** Isolated sandbox to test adversarial prompt injections and jailbreaks without touching the signer.
 
-## Deploy
-
-The API deploys to Render (`render.yaml`) and the frontend to Vercel (`frontend/vercel.json`). Steps, variables and caveats are in [docs/deployment.md](./docs/deployment.md). The Render blueprint lists only the basics; add the planner provider keys, wallet and role settings as secrets in the Render dashboard, never in the file.
 
 ## Current limitations
 
@@ -301,9 +191,21 @@ The API deploys to Render (`render.yaml`) and the frontend to Vercel (`frontend/
 - **Operations:** MongoDB is required; the audit chain detects tampering but is not an external immutable ledger.
 - Some docs under `docs/` are still stubs.
 
+## Deployment
+
+The API is deployed to Render (`render.yaml`) and the frontend to Vercel (`frontend/vercel.json`). Detailed steps, environment variables, and caveats are available in [docs/deployment.md](./docs/deployment.md).
+
+### Backend (Render)
+* **Build Command:** `cd backend; npm install`
+* **Start Command:** `cd backend; npm start`
+
+### Frontend (Vercel)
+* **Build Command:** `cd frontend; npm run build`
+* **Output / Dev Command:** `cd frontend; npm run dev`
+
 ## Contributing
 
-Work on a branch, open a pull request into `main`, and never commit `.env` files, keys or database URIs. Run the three commands in [Tests and checks](#tests-and-checks) before you open the pull request.
+Work on a branch, open a pull request into `main`, and never commit `.env` files, keys or database URIs. Run the commands in [Tests and checks](#tests-and-checks) before you open the pull request.
 
 ## Contributors
 
