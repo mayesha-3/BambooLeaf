@@ -4,6 +4,7 @@ import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import GoalComposer from '../components/GoalComposer'
 import { apiBaseUrl } from '../config/api'
+import { authenticatedFetch } from '../lib/device-session'
 import type { AuditState, Page, UserProfile } from '../types'
 
 type WalletBalance = {
@@ -55,13 +56,17 @@ export default function OverviewPage({
   onNavigate,
   auditState,
   userProfile,
+  isAuthenticated = false,
 }: {
   onNavigate: (page: Page) => void
   auditState: AuditState
   userProfile?: UserProfile
+  isAuthenticated?: boolean
 }) {
   const displayCardName = userProfile?.cardName || (userProfile?.name ? `${userProfile.name.toUpperCase()} · OWNER` : 'MAYES · OWNER')
-  const [walletState, setWalletState] = useState<WalletState>({ balance: null, loading: true, error: '' })
+  const [walletState, setWalletState] = useState<WalletState>(() => isAuthenticated
+    ? { balance: null, loading: true, error: '' }
+    : { balance: null, loading: false, error: 'Log in to view your balance.' })
   const [currentTime, setCurrentTime] = useState(0)
   const [chartPeriod, setChartPeriod] = useState<'7d' | '30d' | '90d'>('7d')
   const [chartType, setChartType] = useState<'bar' | 'line'>('bar')
@@ -69,10 +74,11 @@ export default function OverviewPage({
 
   // Fetch Live Wallet Balance
   useEffect(() => {
+    if (!isAuthenticated) return
     const controller = new AbortController()
     async function loadWalletBalance() {
       try {
-        const response = await fetch(`${apiBaseUrl}/wallet/balance`, { signal: controller.signal })
+        const response = await authenticatedFetch(`${apiBaseUrl}/wallet/balance`, { signal: controller.signal })
         const payload = await response.json().catch(() => null) as (WalletBalance & { error?: string }) | null
         if (!response.ok) throw new Error(payload?.error || `Wallet API returned ${response.status}`)
         if (
@@ -98,7 +104,7 @@ export default function OverviewPage({
     }
     void loadWalletBalance()
     return () => controller.abort()
-  }, [])
+  }, [isAuthenticated])
 
   useEffect(() => {
     const timer = window.setTimeout(() => setCurrentTime(Date.now()), 0)

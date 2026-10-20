@@ -130,7 +130,8 @@ BambooLeaf is a **guarded AI agent wallet** designed for secure, autonomous Web3
 
 > **Status:** Hackathon prototype running on **Ethereum Sepolia Testnet** (`Chain ID: 11155111`). Never use a private key controlling real mainnet assets.
 
-[For detailed information, check "docs" folder]
+For detailed information, see the [docs folder](./docs/).
+
 ---
 
 ## Live Deployments

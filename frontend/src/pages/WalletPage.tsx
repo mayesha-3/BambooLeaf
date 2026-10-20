@@ -5,12 +5,14 @@ import PageHeading from '../components/ui/PageHeading'
 import Icon from '../components/ui/Icon'
 import type { Page, UserProfile } from '../types'
 import { apiBaseUrl } from '../config/api'
+import { authenticatedFetch } from '../lib/device-session'
 import LiveRatesConverterCard from '../features/market/LiveRatesConverterCard'
 import { getCryptoIcon } from '../features/market/CryptoIcons'
 
 interface WalletPageProps {
   userProfile?: UserProfile
   onNavigate?: (page: Page) => void
+  isAuthenticated?: boolean
 }
 
 type WalletSnapshot = {
@@ -21,7 +23,7 @@ type WalletSnapshot = {
   usdcAddress: string | null
 }
 
-export default function WalletPage({ userProfile, onNavigate }: WalletPageProps = {}) {
+export default function WalletPage({ userProfile, onNavigate, isAuthenticated = false }: WalletPageProps = {}) {
   // Privacy mode: Hide balances by default for security / shoulder-surfing protection
   const [hideBalances, setHideBalances] = useState(true)
 
@@ -33,14 +35,15 @@ export default function WalletPage({ userProfile, onNavigate }: WalletPageProps 
   // Receive modal
   const [showReceiveModal, setShowReceiveModal] = useState(false)
   const [wallet, setWallet] = useState<WalletSnapshot | null>(null)
-  const [walletLoading, setWalletLoading] = useState(true)
-  const [walletError, setWalletError] = useState('')
+  const [walletLoading, setWalletLoading] = useState(isAuthenticated)
+  const [walletError, setWalletError] = useState(isAuthenticated ? '' : 'Log in to view your wallet balance.')
 
   useEffect(() => {
+    if (!isAuthenticated) return
     const controller = new AbortController()
     async function loadWallet() {
       try {
-        const response = await fetch(`${apiBaseUrl}/wallet/balance`, { signal: controller.signal })
+        const response = await authenticatedFetch(`${apiBaseUrl}/wallet/balance`, { signal: controller.signal })
         const payload = await response.json() as WalletSnapshot & { error?: string }
         if (!response.ok) throw new Error(payload.error || `Wallet API returned ${response.status}`)
         if (
@@ -60,7 +63,7 @@ export default function WalletPage({ userProfile, onNavigate }: WalletPageProps 
     }
     void loadWallet()
     return () => controller.abort()
-  }, [])
+  }, [isAuthenticated])
 
   const walletAddress = wallet?.address || ''
   const chainLabel = wallet ? `Chain ${wallet.chainId}` : 'Network unavailable'

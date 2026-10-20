@@ -962,16 +962,18 @@ export function App() {
             <main className="p-5 sm:p-7 lg:p-8 flex-1 overflow-y-auto">
               {page === 'overview' && (
                 <OverviewPage
+                  key={account ? userProfile.walletAddress || 'signed-in' : 'guest'}
                   onNavigate={navigate}
                   auditState={auditState}
                   userProfile={userProfile}
+                  isAuthenticated={Boolean(account)}
                 />
               )}
               {page === 'activity' && <ActivityPage auditState={auditState} refreshAudit={refreshAudit} />}
               {page === 'approvals' && <ApprovalsPage />}
               {page === 'policy' && <PolicyPage />}
               {page === 'autonomy' && <AutonomyPage />}
-              {page === 'wallet' && <WalletPage userProfile={userProfile} onNavigate={navigate} />}
+              {page === 'wallet' && <WalletPage key={account ? userProfile.walletAddress || 'signed-in' : 'guest'} userProfile={userProfile} onNavigate={navigate} isAuthenticated={Boolean(account)} />}
               {page === 'arena' && <ArenaPage />}
               {page === 'compliance' && <ComplianceConsole />}
               {page === 'payments' && <PaymentsPage />}
