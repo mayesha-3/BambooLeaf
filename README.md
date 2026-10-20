@@ -39,6 +39,7 @@ Express API Gateway (Device Authentication, RBAC, Request Proofs ≤30s)
 [ EXECUTION ZONE ]
 Ethereum Sepolia (Chain ID: 11155111) & Tamper-Evident Audit Log
 
+```
 
 | Layer | What it enforces |
 |---|---|
@@ -49,7 +50,7 @@ Ethereum Sepolia (Chain ID: 11155111) & Tamper-Evident Audit Log
 | Approvals and signer | Owner approves a digest that binds chain, destination, value, calldata, nonce and expiry; the signer re-verifies right before sending |
 | Audit | Every decision is written to a hash-linked log that can be verified through the API |
 
-### Architecture Decision: Why MongoDB Instead of SQL?
+## Architecture Decision: Why MongoDB Instead of SQL?
 
 If you're wondering why a financial application uses a NoSQL database instead of SQL (like PostgreSQL), here is our reasoning:
 
@@ -58,8 +59,6 @@ If you're wondering why a financial application uses a NoSQL database instead of
 3. **Efficient JSON Handling:** Our AI planner generates complex, nested JSON intents. MongoDB's flexible schema handles this dynamic data natively and much faster than SQL's relational tables.
 4. **High Scalability:** If the system scales to thousands of active agents and devices, MongoDB can easily handle the load through horizontal scaling.
 5. **Developer Velocity:** Since this is an AI prototype, data requirements change rapidly. With SQL, adding a new field requires writing migration scripts and altering tables. With MongoDB, we just add the field to our JSON model and it works instantly, saving us critical development time.
-
----
 
 ## Repository layout
 
@@ -76,6 +75,7 @@ frontend/           React 19 + Vite + Tailwind UI (pages: Overview, Chat, Wallet
 docs/               deployment, technical handoff, swap fork setup
 evidence/           recorded red-team / transaction evidence
 render.yaml         Render blueprint for the API
+
 ```
 
 ## Quick start (local)
@@ -148,6 +148,7 @@ cd backend && npx tsx scripts/test-anvil-swap.tsx
 
 # 4. Frontend production build
 cd frontend && npm run build
+```
 
 Note that `npm test` inside `backend` runs only the integration folder because of how the shell expands the glob; use the explicit command above for the unit tests.
 
