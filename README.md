@@ -123,7 +123,7 @@ Wallet balances are shown only to a signed-in user; the balance API returns `401
 
 ## Tests and checks
 
-**225 automated tests** pass on `main` (20 Oct 2026): 104 planner, 113 backend unit and 8 backend integration. These run offline (no network, no model calls, no transactions):
+**225 automated tests** pass on `main` (20 Oct 2026): 104 planner, 113 backend unit and 8 backend integration. These run offline (no network, no model calls, no transactions). Run each command from the repository root:
 
 ```bash
 # AI planner: 104 tests + strict typecheck
@@ -192,7 +192,7 @@ Work on a branch, open a pull request into `main`, and never commit `.env` files
 
 | Name | Role | GitHub |
 | :--- | :--- | :--- |
-| **Mayesha Afraoz** | Security Lead | [@mayesha-3](https://github.com/mayesha-3) |
+| **Mayesha Afrooz** | Security Lead | [@mayesha-3](https://github.com/mayesha-3) |
 | **Hosaina Jabara Razty** | Security & Blockchain | [@404Kin](https://github.com/404Kin) |
 | **Fabiya Anjum** | AI Engineer | [@FabiZzzCode](https://github.com/FabiZzzCode) |
 | **Mohammad Araf** | Full Stack | [@Araf1011](https://github.com/Araf1011) |
