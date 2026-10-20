@@ -59,6 +59,8 @@ If you're wondering why a financial application uses a NoSQL database instead of
 4. **High Scalability:** If the system scales to thousands of active agents and devices, MongoDB can easily handle the load through horizontal scaling.
 5. **Developer Velocity:** Since this is an AI prototype, data requirements change rapidly. With SQL, adding a new field requires writing migration scripts and altering tables. With MongoDB, we just add the field to our JSON model and it works instantly, saving us critical development time.
 
+---
+
 ## Repository layout
 
 ```text
